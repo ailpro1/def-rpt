@@ -1,0 +1,76 @@
+/* Fast Report — printable report layout (A4 portrait) */
+.report-wrap{background:#8a8a8e;padding:12px 0 32px;min-height:100vh}
+@media (prefers-color-scheme: dark){.report-wrap{background:#3a3a3c}}
+
+/* Pages are always laid out at true A4; --scale only shrinks them to fit the
+   screen. Print resets the scale so output is 1:1. */
+.rpage-holder{
+  width:calc(210mm * var(--scale,1));
+  height:calc(297mm * var(--scale,1));
+  margin:0 auto 12px;overflow:hidden;
+}
+.rpage{
+  position:relative;background:#fff;color:#000;width:210mm;height:297mm;
+  padding:14mm 12mm 12mm;box-shadow:0 2px 10px #0006;
+  font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:9pt;line-height:1.3;
+  display:flex;flex-direction:column;
+  transform:scale(var(--scale,1));transform-origin:top left;
+}
+.rpage *{box-sizing:border-box}
+
+/* header */
+.rhead{border-bottom:1.2pt solid #000;padding-bottom:2mm;margin-bottom:4mm}
+.rhead table{width:100%;border-collapse:collapse}
+.rhead td{vertical-align:top;padding:0 0 1mm}
+.rhead td.rh-k{font-weight:700;white-space:nowrap;padding:0 3mm 1mm 0;width:1%}
+.rh-v{font-weight:400}
+.rh-title{text-transform:uppercase}
+
+/* photo grid — cells always fill the page, whatever the photos-per-page */
+.rgrid{display:grid;
+  grid-template-columns:repeat(var(--cols,2),1fr);
+  grid-template-rows:repeat(var(--rows,3),1fr);
+  column-gap:5mm;row-gap:4mm;flex:1;min-height:0}
+.rcell{display:flex;flex-direction:column;min-height:0;break-inside:avoid}
+.rcell .ph{flex:1;min-height:0;width:100%;object-fit:cover;display:block;background:#eee}
+.rcell .cp{flex:none;margin-top:1.4mm;font-size:8.2pt;line-height:1.28;
+  text-transform:uppercase;white-space:pre-line}
+.rcell .cp .sub{text-transform:none}
+
+/* footer */
+.rfoot{border-top:1.2pt solid #000;padding-top:1.5mm;margin-top:4mm;
+  display:flex;justify-content:space-between;font-size:8.5pt}
+.rfoot .left{color:#333}
+
+/* cover */
+.rcover{justify-content:flex-start;overflow:hidden}
+.rcover .c-logo{max-width:60mm;max-height:26mm;object-fit:contain;margin-bottom:10mm}
+.rcover .c-kicker{font-size:10pt;letter-spacing:.16em;text-transform:uppercase;color:#555;margin-bottom:3mm}
+.rcover .c-title{font-size:26pt;font-weight:700;line-height:1.12;margin:0 0 4mm;letter-spacing:-.01em}
+.rcover .c-sub{font-size:12pt;color:#333;margin-bottom:14mm;white-space:pre-line}
+.rcover .c-rule{height:2.4pt;background:#000;width:38mm;margin-bottom:12mm}
+.rcover .c-meta{width:100%;border-collapse:collapse;font-size:10pt;margin-top:auto}
+.rcover .c-meta td{border-top:.5pt solid #bbb;padding:2.4mm 0;vertical-align:top}
+.rcover .c-meta td:first-child{font-weight:700;width:34mm;text-transform:uppercase;font-size:8.5pt;letter-spacing:.04em;padding-top:2.9mm}
+.rcover .c-body{font-size:10pt;white-space:pre-line;margin-top:8mm}
+
+/* text page (executive summary / notes) */
+.rtext h2{font-size:14pt;margin:0 0 4mm;text-transform:uppercase;letter-spacing:.02em}
+.rtext .body{font-size:10pt;line-height:1.5;white-space:pre-line}
+.rtext table.sum{width:100%;border-collapse:collapse;margin-top:6mm;font-size:9pt}
+.rtext table.sum th,.rtext table.sum td{border:.5pt solid #999;padding:1.8mm 2mm;text-align:left}
+.rtext table.sum th{background:#eee;font-size:8.5pt;text-transform:uppercase;letter-spacing:.03em}
+.rtext table.sum td.n{text-align:right;width:22mm}
+
+@page{size:A4 portrait;margin:0}
+@media print{
+  html,body{background:#fff!important;margin:0;padding:0}
+  body *{visibility:hidden}
+  .report-wrap,.report-wrap *{visibility:visible}
+  .report-wrap{position:absolute;inset:0;background:#fff;padding:0;margin:0}
+  .rpage-holder{width:auto;height:auto;overflow:visible;margin:0}
+  .rpage{box-shadow:none;margin:0;break-after:page;page-break-after:always;
+    transform:none!important;width:210mm;height:297mm}
+  .rpage:last-child{break-after:auto;page-break-after:auto}
+  .navbar,.tabbar,.toast,.fab{display:none!important}
+}

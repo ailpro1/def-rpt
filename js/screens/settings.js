@@ -1,0 +1,215 @@
+import * as ui from '../ui.js';
+import { getSettings, saveSettings, putBlob, deleteBlob, getBlob, listProjects, DEFAULT_SETTINGS } from '../store.js';
+import * as db from '../db.js';
+import { ingest, blobUrl } from '../image.js';
+import { exportBackup, importBackup, backupFilename, saveFile } from '../backup.js';
+
+export default async function renderSettings() {
+  let s = await getSettings(true);
+  const screen = ui.h('div', { class: 'screen' });
+  const body = ui.h('div', { class: 'scroll' });
+
+  screen.appendChild(ui.navbar({ title: 'Settings', largeTitle: true }));
+  screen.appendChild(body);
+
+  const logoInput = ui.h('input', {
+    type: 'file', accept: 'image/*', style: { display: 'none' },
+    onchange: async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const { blob } = await ingest(f, { maxPx: 900, quality: 0.9, thumbPx: 200 });
+      if (s.logoBlobId) await deleteBlob(s.logoBlobId);
+      const id = await putBlob(blob);
+      s = await saveSettings({ logoBlobId: id });
+      logoInput.value = '';
+      ui.toast('Logo saved');
+      paint();
+    },
+  });
+  const restoreInput = ui.h('input', {
+    type: 'file', accept: 'application/json,.json', style: { display: 'none' },
+    onchange: async (e) => {
+      const f = e.target.files[0];
+      restoreInput.value = '';
+      if (!f) return;
+      const mode = await ui.actionSheet('Restore backup', [
+        { label: 'Merge into this device', value: 'merge', icon: 'copy', color: 'var(--sys-blue)', primary: true, sub: 'Keeps existing projects' },
+        { label: 'Replace everything', value: 'replace', icon: 'trash', color: 'var(--sys-red)', destructive: true, sub: 'Deletes projects on this device first' },
+      ]);
+      if (!mode) return;
+      try {
+        ui.toast('Restoring…', 60000);
+        const r = await importBackup(f, { merge: mode === 'merge' });
+        s = await getSettings(true);
+        ui.toast(`Restored ${r.projects} project(s), ${r.photos} photo(s)`);
+        paint();
+      } catch (err) { ui.alert('Restore failed', err.message); }
+    },
+  });
+  screen.append(logoInput, restoreInput);
+
+  const set = async (patch) => { s = await saveSettings(patch); };
+
+  function editTextSheet(title, key, placeholder, note) {
+    let value = s[key] || '';
+    const body2 = ui.h('div', {},
+      note ? ui.h('div', { class: 'hint', text: note }) : null,
+      ui.group('', [ui.textRow(title, value, (v) => { value = v; }, { placeholder })]));
+    ui.sheet({
+      title, body: body2, rightLabel: 'Save',
+      onRight: async () => { await set({ [key]: value }); paint(); ui.toast('Saved'); },
+    });
+  }
+
+  async function backupSheet() {
+    const projects = await listProjects();
+    const pick = await ui.actionSheet('Backup', [
+      { label: 'Full backup', value: 'all', icon: 'down', color: 'var(--sys-blue)', primary: true, sub: 'Projects, photos and settings' },
+      { label: 'One project only', value: 'one', icon: 'folder', color: 'var(--sys-teal)', sub: 'Hand a job to a colleague' },
+    ]);
+    if (!pick) return;
+    let ids = null; let label = 'all';
+    if (pick === 'one') {
+      if (!projects.length) { ui.toast('No projects yet'); return; }
+      const chosen = await ui.actionSheet('Which project?', projects.map((p) => ({ label: p.name, value: p.id, icon: 'folder', color: 'var(--sys-blue)' })));
+      if (!chosen) return;
+      ids = [chosen];
+      label = projects.find((p) => p.id === chosen).name;
+    }
+    ui.toast('Preparing backup…', 60000);
+    try {
+      const blob = await exportBackup(ids);
+      const res = await saveFile(blob, backupFilename(label));
+      if (res !== 'cancelled') {
+        await set({ lastBackupAt: Date.now() });
+        ui.toast(`Backup ready (${ui.fmtBytes(blob.size)})`);
+        paint();
+      } else ui.toast('Cancelled');
+    } catch (err) { ui.alert('Backup failed', err.message); }
+  }
+
+  function aiSheet() {
+    const draft = { ...s.ai };
+    const body2 = ui.h('div', {},
+      ui.h('div', { class: 'hint', text: 'The assistant suggests captions from your photos and drafts the executive summary. It needs a connection; everything else in the app works offline.' }),
+      ui.group('', [
+        ui.switchRow('Enable assistant', draft.enabled, (v) => { draft.enabled = v; }),
+        ui.inputRow('API key', draft.key ? '••••••••' + draft.key.slice(-4) : '', (v) => { draft.key = v; }, { placeholder: 'sk-ant-…' }),
+        ui.inputRow('Model', draft.model, (v) => { draft.model = v; }, { placeholder: 'claude-opus-5' }),
+      ]),
+      ui.h('div', { class: 'group-note', text: 'The key is stored on this device only and is sent to Anthropic with each request. It is never included in a backup file.' }));
+    ui.sheet({
+      title: 'AI Assistant', body: body2, rightLabel: 'Save',
+      onRight: async () => {
+        const key = draft.key.startsWith('••') ? s.ai.key : draft.key.trim();
+        await set({ ai: { ...draft, key } });
+        paint(); ui.toast('Saved');
+      },
+    });
+  }
+
+  async function paint() {
+    ui.clear(body);
+
+    /* branding */
+    const logoBlob = s.logoBlobId ? await getBlob(s.logoBlobId) : null;
+    const logoPreview = logoBlob
+      ? ui.h('img', { src: blobUrl(s.logoBlobId + ':lg', logoBlob), style: { height: '30px', maxWidth: '110px', objectFit: 'contain' } })
+      : null;
+
+    body.appendChild(ui.group('Your Details', [
+      ui.inputRow('Company', s.company, (v) => set({ company: v })),
+      ui.inputRow('Prepared by', s.preparedBy, (v) => set({ preparedBy: v })),
+      ui.inputRow('Contact', s.contact, (v) => set({ contact: v })),
+      ui.row({
+        title: 'Logo', sub: s.logoBlobId ? 'Shown on the cover page' : 'Not set',
+        right: logoPreview, onclick: () => logoInput.click(), chevron: !logoPreview,
+      }),
+      s.logoBlobId ? ui.row({
+        title: 'Remove logo', cls: 'destructive',
+        onclick: async () => { await deleteBlob(s.logoBlobId); await set({ logoBlobId: null }); paint(); },
+      }) : null,
+    ]));
+
+    /* report defaults */
+    body.appendChild(ui.group('Report Defaults', [
+      ui.inputRow('Report title', s.reportTitle, (v) => set({ reportTitle: v })),
+      ui.switchRow('Cover page', s.coverEnabled, (v) => set({ coverEnabled: v })),
+      ui.inputRow('Cover kicker', s.coverKicker, (v) => set({ coverKicker: v })),
+      ui.row({ title: 'Cover note', sub: s.coverBody ? s.coverBody.slice(0, 60) + '…' : 'Not set', chevron: true, onclick: () => editTextSheet('Cover note', 'coverBody', 'Optional paragraph on the cover page') }),
+      ui.switchRow('Executive summary', s.summaryEnabled, (v) => set({ summaryEnabled: v })),
+      ui.inputRow('Summary heading', s.summaryTitle, (v) => set({ summaryTitle: v })),
+      ui.row({ title: 'Summary text', sub: (s.summaryBody || '').slice(0, 60) + '…', chevron: true, onclick: () => editTextSheet('Executive summary', 'summaryBody', 'Default summary text') }),
+      ui.switchRow('Summary table', s.summaryTableEnabled, (v) => set({ summaryTableEnabled: v }), 'Photo and item counts per location'),
+      ui.switchRow('Notes & limitations page', s.notesEnabled, (v) => set({ notesEnabled: v })),
+      ui.row({ title: 'Notes text', sub: s.notesBody ? s.notesBody.slice(0, 60) + '…' : 'Not set', chevron: true, onclick: () => editTextSheet('Notes & limitations', 'notesBody', 'Scope, method and limitations') }),
+      ui.inputRow('Page footer', s.footerText, (v) => set({ footerText: v }), { placeholder: 'Left side of the page footer' }),
+    ]));
+
+    /* capture */
+    body.appendChild(ui.group('Capture', [
+      ui.row({
+        title: 'Photo size',
+        right: ui.h('select', {
+          onchange: (e) => set({ imageMaxPx: Number(e.target.value) }),
+          style: { border: 0, background: 'none', fontSize: '17px', color: 'var(--label-2)' },
+        }, ...[[1200, 'Small (fast)'], [1600, 'Standard'], [2200, 'Large (sharp)']].map(([v, l]) => {
+          const o = ui.h('option', { value: String(v), text: l });
+          if (v === s.imageMaxPx) o.selected = true;
+          return o;
+        })),
+      }),
+      ui.row({
+        title: 'Photos per report page',
+        right: ui.h('select', {
+          onchange: (e) => set({ photosPerPage: Number(e.target.value) }),
+          style: { border: 0, background: 'none', fontSize: '17px', color: 'var(--label-2)' },
+        }, ...[2, 4, 6, 8].map((n) => {
+          const o = ui.h('option', { value: String(n), text: String(n) });
+          if (n === s.photosPerPage) o.selected = true;
+          return o;
+        })),
+      }),
+      ui.row({ title: 'Caption & section library', sub: 'Quick-pick captions used on site', chevron: true, onclick: () => { location.hash = '#/library'; } }),
+    ]));
+
+    /* AI */
+    body.appendChild(ui.group('Assistant', [
+      ui.row({
+        title: 'AI assistant',
+        value: s.ai.enabled && s.ai.key ? 'On' : 'Off',
+        iconName: 'sparkle', iconColor: 'var(--sys-indigo)',
+        chevron: true, onclick: aiSheet,
+      }),
+    ]));
+
+    /* backup */
+    const est = await db.estimate();
+    body.appendChild(ui.group('Backup & Storage', [
+      ui.row({ title: 'Back up now', cls: 'action', iconName: 'down', iconColor: 'var(--sys-blue)', onclick: backupSheet }),
+      ui.row({ title: 'Restore from file', cls: 'action', iconName: 'up', iconColor: 'var(--sys-teal)', onclick: () => restoreInput.click() }),
+      ui.row({ title: 'Last backup', value: s.lastBackupAt ? ui.fmtDate(s.lastBackupAt) : 'Never' }),
+      est ? ui.row({ title: 'Storage used', value: `${ui.fmtBytes(est.usage || 0)} of ${ui.fmtBytes(est.quota || 0)}` }) : null,
+    ]));
+
+    /* danger */
+    body.appendChild(ui.group('', [
+      ui.row({
+        title: 'Reset report defaults', cls: 'destructive',
+        onclick: async () => {
+          const ok = await ui.confirm('Reset defaults?', 'Cover, summary and notes text return to the built-in wording. Projects and photos are not touched.', { okLabel: 'Reset', destructive: true });
+          if (!ok) return;
+          const keep = ['company', 'preparedBy', 'contact', 'logoBlobId', 'captionLib', 'sectionLib', 'usage', 'ai', 'lastBackupAt'];
+          const patch = {};
+          Object.keys(DEFAULT_SETTINGS).forEach((k) => { if (!keep.includes(k) && k !== 'id') patch[k] = DEFAULT_SETTINGS[k]; });
+          await set(patch); paint(); ui.toast('Defaults restored');
+        },
+      }),
+    ]));
+
+    body.appendChild(ui.h('div', { class: 'group-note', style: { textAlign: 'center', padding: '22px 16px 8px' }, text: 'Fast Report — works offline. Photos and projects stay on this device until you back them up.' }));
+  }
+
+  await paint();
+  return screen;
+}
