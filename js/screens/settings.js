@@ -3,6 +3,7 @@ import { getSettings, saveSettings, putBlob, deleteBlob, getBlob, listProjects, 
 import * as db from '../db.js';
 import { ingest, blobUrl } from '../image.js';
 import { exportBackup, importBackup, backupFilename, saveFile } from '../backup.js';
+import { ask, DEFAULT_MODEL } from '../ai.js';
 
 export default async function renderSettings() {
   let s = await getSettings(true);
@@ -90,19 +91,52 @@ export default async function renderSettings() {
 
   function aiSheet() {
     const draft = { ...s.ai };
+    const resolveKey = () => (draft.key.startsWith('••') ? s.ai.key : draft.key.trim());
+
+    const modelRow = ui.inputRow('Model', draft.model, (v) => { draft.model = v; }, { placeholder: DEFAULT_MODEL });
+    const modelField = modelRow.querySelector('input');
+    const presets = ui.h('div', { class: 'chips scrollrow' },
+      ...['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'].map((m) =>
+        ui.h('button', {
+          class: 'chip', text: m,
+          onclick: () => { draft.model = m; modelField.value = m; ui.haptic(); },
+        })));
+
+    const testBtn = ui.h('button', { class: 'btn tinted wide' }, ui.h('span', { text: 'Test connection' }));
+    testBtn.onclick = async () => {
+      const label = testBtn.querySelector('span');
+      const key = resolveKey();
+      if (!key) { ui.toast('Enter an API key first'); return; }
+      testBtn.disabled = true; label.textContent = 'Testing\u2026';
+      const prev = { ...s.ai };
+      try {
+        await set({ ai: { ...draft, key, enabled: true } });
+        const reply = await ask('Reply with the single word OK.');
+        ui.toast(reply ? 'Connected \u2014 assistant is working' : 'No reply from the model');
+      } catch (err) {
+        await set({ ai: prev });
+        ui.alert('Test failed', err.message);
+      }
+      label.textContent = 'Test connection';
+      testBtn.disabled = false;
+    };
+
     const body2 = ui.h('div', {},
-      ui.h('div', { class: 'hint', text: 'The assistant suggests captions from your photos and drafts the executive summary. It needs a connection; everything else in the app works offline.' }),
-      ui.group('', [
+      ui.h('div', { class: 'hint', text: 'The assistant suggests captions from your photos, captions a batch in one go, drafts the executive summary and answers questions about the inspection. It needs a connection; everything else in the app works offline.' }),
+      ui.group('Google AI Studio', [
         ui.switchRow('Enable assistant', draft.enabled, (v) => { draft.enabled = v; }),
-        ui.inputRow('API key', draft.key ? '••••••••' + draft.key.slice(-4) : '', (v) => { draft.key = v; }, { placeholder: 'sk-ant-…' }),
-        ui.inputRow('Model', draft.model, (v) => { draft.model = v; }, { placeholder: 'claude-opus-5' }),
+        ui.inputRow('API key', draft.key ? '••••••••' + draft.key.slice(-4) : '', (v) => { draft.key = v; }, { placeholder: 'AIza…' }),
+        modelRow,
       ]),
-      ui.h('div', { class: 'group-note', text: 'The key is stored on this device only and is sent to Anthropic with each request. It is never included in a backup file.' }));
+      presets,
+      ui.h('div', { class: 'btn-stack' }, testBtn),
+      ui.h('div', { class: 'group-note', text: 'Get a key at aistudio.google.com. It is stored on this device only, sent to Google with each request, and is never included in a backup file.' }),
+      ui.h('div', { class: 'group-note', text: 'Free-tier keys are rate limited and Google may use free-tier requests to improve their models. Use a billed key for client photos that must stay private.' }));
+
     ui.sheet({
       title: 'AI Assistant', body: body2, rightLabel: 'Save',
       onRight: async () => {
-        const key = draft.key.startsWith('••') ? s.ai.key : draft.key.trim();
-        await set({ ai: { ...draft, key } });
+        await set({ ai: { ...draft, key: resolveKey() } });
         paint(); ui.toast('Saved');
       },
     });
@@ -177,6 +211,7 @@ export default async function renderSettings() {
     body.appendChild(ui.group('Assistant', [
       ui.row({
         title: 'AI assistant',
+        sub: s.ai.enabled && s.ai.key ? s.ai.model : 'Google AI Studio (Gemini)',
         value: s.ai.enabled && s.ai.key ? 'On' : 'Off',
         iconName: 'sparkle', iconColor: 'var(--sys-indigo)',
         chevron: true, onclick: aiSheet,

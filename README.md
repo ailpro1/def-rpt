@@ -33,9 +33,10 @@ caption you want is usually the first chip.
 - **Annotation** — circle, arrow, box, freehand, text, dot; six colours, three widths,
   undo/clear. Strokes are stored as normalised vectors, so a photo stays re-editable
   and re-renders at any size. A flattened JPEG is generated for the report and sharing.
-- **AI assistant** (optional, online) — suggests a caption from the photo, captions a
-  batch in one request, drafts the executive summary from the recorded items, and
-  answers questions about the inspection. Everything else works with no connection.
+- **AI assistant** (optional, online) — Google AI Studio (Gemini). Suggests a caption
+  from the photo, captions a batch in one request, drafts the executive summary from
+  the recorded items, and answers questions about the inspection. Everything else
+  works with no connection.
 - **Report** — cover page (logo, title, property, metadata), executive summary with an
   item-count table, optional notes/limitations page, then paginated photo pages.
   2 / 4 / 6 / 8 photos per page. Print or Save as PDF via the OS print dialog.
@@ -99,7 +100,7 @@ js/db.js                IndexedDB wrapper
 js/store.js             projects / sections / photos / settings
 js/image.js             decode, downscale, annotate render, flatten
 js/captions.js          default caption + section library, offline ranker
-js/ai.js                Anthropic API calls (optional)
+js/ai.js                Google AI Studio (Gemini) calls (optional)
 js/backup.js            export / import / share
 js/ui.js                DOM helpers, sheets, alerts, rows
 js/screens/*.js         one module per screen
@@ -118,11 +119,30 @@ tools/make-icons.mjs    regenerates the PWA icons (no dependencies)
 
 ## AI assistant setup
 
-Settings → Assistant → AI assistant. Enable it and paste an Anthropic API key.
+Settings → Assistant → AI assistant. Enable it, paste a Google AI Studio key
+(`AIza…`, from [aistudio.google.com](https://aistudio.google.com)), pick a model, and
+tap **Test connection**.
 
-The key is stored on that device only, is sent to `api.anthropic.com` and nowhere
-else, and is **excluded from backup files**. Without a key the app falls back to
-offline suggestions from the caption library.
+Default model is `gemini-2.5-flash`. Model presets are one tap, or type any model
+name AI Studio lists. For caption work, thinking is disabled on Flash models so short
+replies are not swallowed by the reasoning budget.
+
+The key is stored on that device only, is sent to `generativelanguage.googleapis.com`
+and nowhere else, and is **excluded from backup files**. Without a key the app falls
+back to offline suggestions from the caption library.
+
+Two things to know about free-tier keys:
+
+- They are rate limited. Batch captioning many photos at once can hit the per-minute
+  cap; the app reports this and you can retry with fewer photos.
+- Google may use free-tier requests to improve their models. Use a billed key for
+  client photos that must stay private.
+
+### Using a different provider
+
+Only `call()` and the small `imagePart()` helper in `js/ai.js` are Gemini-specific.
+Every feature above builds provider-neutral prompts, so swapping to another vision
+model is a change to that one function.
 
 ## Notes
 

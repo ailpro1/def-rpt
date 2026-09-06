@@ -33,7 +33,7 @@ export const DEFAULT_SETTINGS = {
   captionLib: DEFAULT_CAPTIONS,
   sectionLib: DEFAULT_SECTIONS,
   usage: {},              // caption text -> {n,last,sections{}}
-  ai: { key: '', model: 'claude-opus-5', enabled: false },
+  ai: { key: '', model: 'gemini-2.5-flash', enabled: false },
   lastBackupAt: null,
 };
 
