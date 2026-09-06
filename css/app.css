@@ -231,3 +231,12 @@ svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.9;stroke
 .fab svg{width:28px;height:28px;stroke-width:2.4}
 .dragging{opacity:.4}
 .drop-before{box-shadow:inset 3px 0 0 var(--sys-blue)}
+
+/* ---------- update overlay ---------- */
+.updating{position:fixed;inset:0;z-index:500;display:grid;place-items:center;
+  background:var(--bar);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  animation:fade .2s}
+.updating .u-box{background:var(--bg-elev);border-radius:16px;padding:24px 28px;
+  text-align:center;box-shadow:0 12px 40px #00000038;max-width:78vw}
+.updating .u-box p{margin:12px 0 0;font-size:16px;font-weight:600;letter-spacing:-.01em}
+.updating .u-box small{display:block;margin-top:5px;font-size:13px;color:var(--label-2);font-weight:400}

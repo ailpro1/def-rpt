@@ -99,14 +99,15 @@ export default async function renderReport(projectId) {
       ui.h('div', { class: 'right', text: right || '' }));
   }
 
-  function sectionHeader(title, groupText) {
+  /* Title is the project, Group is the section this page belongs to. */
+  function sectionHeader(groupText) {
     const table = ui.h('table', {},
       ui.h('tbody', {},
         ui.h('tr', {},
           ui.h('td', { class: 'rh-k', text: 'Title:' }),
-          ui.h('td', { class: 'rh-v rh-title', text: title }),
+          ui.h('td', { class: 'rh-v rh-title', text: project.name }),
           ui.h('td', { class: 'rh-k', style: { paddingLeft: '6mm' }, text: 'Group:' }),
-          ui.h('td', { class: 'rh-v', text: groupText }))));
+          ui.h('td', { class: 'rh-v rh-title', text: groupText }))));
     return ui.h('div', { class: 'rhead' }, table);
   }
 
@@ -136,7 +137,8 @@ export default async function renderReport(projectId) {
       data.push({ section: s, photos: ph });
     }
 
-    const groupText = project.address || project.name;
+    // Address is no longer in the header, so it rides in the footer instead.
+    const footerLeft = settings.footerText || project.address || '';
     const pages = [];
 
     /* cover */
@@ -168,7 +170,7 @@ export default async function renderReport(projectId) {
     /* executive summary */
     if (opts.summary) {
       const s = page('rtext');
-      s.appendChild(sectionHeader(settings.summaryTitle || 'EXECUTIVE SUMMARY', groupText));
+      s.appendChild(sectionHeader(settings.summaryTitle || 'EXECUTIVE SUMMARY'));
       s.appendChild(ui.h('div', { class: 'body', text: project.summaryOverride || settings.summaryBody || '' }));
       if (opts.summaryTable) {
         const rows = data.map((d) => {
@@ -192,16 +194,16 @@ export default async function renderReport(projectId) {
               ui.h('td', { class: 'n', html: `<b>${total[2]}</b>` }))));
         s.appendChild(table);
       }
-      s.appendChild(footer(project.ref || '', ''));
+      s.appendChild(footer(footerLeft, ''));
       pages.push(s);
     }
 
     /* notes */
     if (opts.notes && settings.notesBody) {
       const n = page('rtext');
-      n.appendChild(sectionHeader(settings.notesTitle || 'NOTES & LIMITATIONS', groupText));
+      n.appendChild(sectionHeader(settings.notesTitle || 'NOTES & LIMITATIONS'));
       n.appendChild(ui.h('div', { class: 'body', text: settings.notesBody }));
-      n.appendChild(footer(project.ref || '', ''));
+      n.appendChild(footer(footerLeft, ''));
       pages.push(n);
     }
 
@@ -212,13 +214,13 @@ export default async function renderReport(projectId) {
       if (!chunks.length) chunks.push([]);
       for (let i = 0; i < chunks.length; i++) {
         const pg = page();
-        pg.appendChild(sectionHeader(d.section.title, groupText));
+        pg.appendChild(sectionHeader(d.section.title));
         const g = ui.h('div', { class: 'rgrid' });
         g.style.setProperty('--cols', String(cols()));
         g.style.setProperty('--rows', String(rows()));
         for (const p of chunks[i]) g.appendChild(await photoCell(p));
         pg.appendChild(g);
-        pg.appendChild(footer(settings.footerText || '', `page ${i + 1} of ${chunks.length}`));
+        pg.appendChild(footer(footerLeft, `page ${i + 1} of ${chunks.length}`));
         pages.push(pg);
       }
     }

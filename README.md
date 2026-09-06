@@ -34,9 +34,9 @@ caption you want is usually the first chip.
   undo/clear. Strokes are stored as normalised vectors, so a photo stays re-editable
   and re-renders at any size. A flattened JPEG is generated for the report and sharing.
 - **AI assistant** (optional, online) — Google AI Studio (Gemini). Suggests a caption
-  from the photo, captions a batch in one request, drafts the executive summary from
-  the recorded items, and answers questions about the inspection. Everything else
-  works with no connection.
+  from the photo, captions batches, drafts the executive summary from the recorded
+  items, and answers questions about the inspection. Picks the model itself and is
+  built to stay inside the free tier. Everything else works with no connection.
 - **Report** — cover page (logo, title, property, metadata), executive summary with an
   item-count table, optional notes/limitations page, then paginated photo pages.
   2 / 4 / 6 / 8 photos per page. Print or Save as PDF via the OS print dialog.
@@ -48,6 +48,9 @@ caption you want is usually the first chip.
   merges or replaces.
 - **Offline** — app shell precached by the service worker; all data in IndexedDB with
   persistent storage requested so iOS does not evict it.
+- **Automatic updates** — a new version installs in the background and waits. When
+  nothing is open the app shows *"App is updating. Please wait…"*, hands over and
+  reloads onto the new version. It never swaps mid-annotation, and data is untouched.
 
 ## Run it
 
@@ -72,15 +75,18 @@ server). All paths are relative, so it works from a subdirectory.
 Photo pages reproduce the standard inspection layout:
 
 ```
-Title:  CAR PORCH     Group:  NO. 4, JALAN KLEBANG SEROJA 6, ...
+Title:  NO. 4 KLEBANG SEROJA        Group:  CAR PORCH
 ──────────────────────────────────────────────────────────────
  [photo]              [photo]
  RUSTED LATCH         RUSTED STRIKE HOLE
  [photo]              [photo]
  ...
 ──────────────────────────────────────────────────────────────
-                                                  page 1 of 3
+ NO. 4, JALAN KLEBANG SEROJA 6, ...               page 1 of 3
 ```
+
+**Title** is the project, **Group** is the section. The address prints in the footer
+of every page (or Settings → Page footer, if you set your own).
 
 Pages are laid out at true A4 and scaled down only for the screen, so print output
 is 1:1.
@@ -120,29 +126,59 @@ tools/make-icons.mjs    regenerates the PWA icons (no dependencies)
 ## AI assistant setup
 
 Settings → Assistant → AI assistant. Enable it, paste a Google AI Studio key
-(`AIza…`, from [aistudio.google.com](https://aistudio.google.com)), pick a model, and
-tap **Test connection**.
+(`AIza…`, from [aistudio.google.com](https://aistudio.google.com)), and tap
+**Test connection**.
 
-Default model is `gemini-2.5-flash`. Model presets are one tap, or type any model
-name AI Studio lists. For caption work, thinking is disabled on Flash models so short
-replies are not swallowed by the reasoning budget.
+### Model selection
+
+**Choose model automatically** is on by default. Each job runs on the cheapest model
+that can do it, and steps to the next one by itself when a model is rate limited,
+missing or returns nothing:
+
+| Job | Order tried |
+|---|---|
+| Single caption | `flash-lite` → `flash` |
+| Batch captions | `flash` → `flash-lite` |
+| Summary, chat | `flash` → `flash-lite` |
+
+A model that returns 429 is put on a 90-second cooldown and skipped until it clears.
+After the ladder is exhausted the app waits 4 seconds and retries once, because
+free-tier limits are per minute. Turn the switch off to pin one model instead.
+
+### Staying inside the free tier
+
+The assistant is built to send as little as possible:
+
+| Measure | Effect |
+|---|---|
+| Photos downscaled to 768px before sending | Fits one Gemini image tile — about a quarter of the tokens the 1600px report copy would cost |
+| Caption library trimmed to the 24 most likely for that room | Instead of the whole library on every request |
+| Batched 8 photos per request | System prompt and library paid for once, not eight times |
+| Reply capped at ~24 tokens per caption, thinking off on Flash | A four-word caption cannot run long |
+| Repeated captions collapsed to `UNFILLED GROUT x7` | Summary and chat context stay small on big jobs |
+| Already-captioned photos skipped | Re-running a batch only fills the gaps |
+
+Captions are written to the database **as each batch of 8 lands**, so a rate limit
+part-way through a long section keeps everything already done.
+
+Settings → Capture → **AI photo detail** (Low / Standard / High) trades tokens
+against how much fine detail the model can see. Standard (768px) suits most defect
+work; use High for hairline cracks.
+
+A typical 3–4 hour inspection — 150 photos — is roughly 20 requests.
 
 The key is stored on that device only, is sent to `generativelanguage.googleapis.com`
 and nowhere else, and is **excluded from backup files**. Without a key the app falls
 back to offline suggestions from the caption library.
 
-Two things to know about free-tier keys:
-
-- They are rate limited. Batch captioning many photos at once can hit the per-minute
-  cap; the app reports this and you can retry with fewer photos.
-- Google may use free-tier requests to improve their models. Use a billed key for
-  client photos that must stay private.
+Google may use free-tier requests to improve their models. Use a billed key for
+client photos that must stay private.
 
 ### Using a different provider
 
-Only `call()` and the small `imagePart()` helper in `js/ai.js` are Gemini-specific.
-Every feature above builds provider-neutral prompts, so swapping to another vision
-model is a change to that one function.
+Only `callModel()` and the small `imagePart()` helper in `js/ai.js` are
+Gemini-specific. Every feature builds provider-neutral prompts, so swapping to
+another vision model is a change to those two functions plus the model ladder.
 
 ## Notes
 

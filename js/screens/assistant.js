@@ -1,7 +1,7 @@
 // Ask-the-assistant sheet. Online only; the rest of the app never depends on it.
 import * as ui from '../ui.js';
 import { ask, aiReady } from '../ai.js';
-import { listSections, listPhotos, isOkCaption } from '../store.js';
+import { listSections, listPhotos } from '../store.js';
 
 const QUICK = [
   'Summarise the defects recorded so far',
@@ -16,11 +16,18 @@ export async function buildContext(project) {
   for (const s of sections) {
     const photos = await listPhotos(s.id);
     const caps = photos.map((p) => p.caption).filter(Boolean);
-    if (caps.length) lines.push(`${s.title}: ${caps.join('; ')}`);
+    if (!caps.length) continue;
+    // Repeats are collapsed to "CAPTION x7" — a 40-photo room costs a few tokens
+    // instead of forty, and the model reads the pattern more clearly.
+    const counts = new Map();
+    caps.forEach((c) => counts.set(c, (counts.get(c) || 0) + 1));
+    const tallied = [...counts.entries()]
+      .map(([c, n]) => (n > 1 ? `${c.replace(/\n/g, ' / ')} x${n}` : c.replace(/\n/g, ' / ')))
+      .join('; ');
+    lines.push(`${s.title}: ${tallied}`);
   }
-  const defects = lines.length;
   return `Property: ${project.name}\nAddress: ${project.address}\nDate: ${project.inspectionDate}\n`
-    + `Locations with items: ${defects}\n\n${lines.join('\n')}`;
+    + `Locations with items: ${lines.length}\n\n${lines.join('\n')}`;
 }
 
 export async function openAssistant(project) {

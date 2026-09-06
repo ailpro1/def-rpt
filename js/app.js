@@ -89,6 +89,68 @@ function syncOnline() {
 window.addEventListener('online', syncOnline);
 window.addEventListener('offline', syncOnline);
 
+/* ---------- automatic updates ---------- */
+/* A new service worker installs in the background, then waits. When the app is
+   idle we show "App is updating", hand over, and reload onto the new version. */
+const UPDATE_CHECK_MS = 30 * 60 * 1000;
+let handingOver = false;
+
+function showUpdating() {
+  if (document.querySelector('.updating')) return;
+  document.body.appendChild(ui.h('div', { class: 'updating' },
+    ui.h('div', { class: 'u-box' },
+      ui.h('span', { class: 'spinner' }),
+      ui.h('p', { text: 'App is updating. Please wait…' }),
+      ui.h('small', { text: 'Your projects and photos are not affected.' }))));
+}
+
+/* Never interrupt an open editor or sheet — a half-drawn annotation would be
+   lost. Wait for the screen to be idle, then take the update. */
+const busy = () => !!document.querySelector('.editor, .sheet, .alert');
+
+function handOver(worker) {
+  if (handingOver || !worker) return;
+  handingOver = true;
+  const go = () => {
+    if (busy() || document.hidden) return setTimeout(go, 2000);
+    showUpdating();
+    // Hold the message on screen long enough to read before the reload.
+    setTimeout(() => worker.postMessage('skipWaiting'), 700);
+    // Safety net: if the handover event never arrives, reload anyway.
+    setTimeout(() => reloadOnce(), 6000);
+  };
+  go();
+}
+
+let reloaded = false;
+function reloadOnce() {
+  if (reloaded) return;
+  reloaded = true;
+  showUpdating();
+  location.reload();
+}
+
+async function setupUpdates() {
+  const reg = await navigator.serviceWorker.register('./sw.js');
+  navigator.serviceWorker.addEventListener('controllerchange', reloadOnce);
+
+  if (reg.waiting && navigator.serviceWorker.controller) handOver(reg.waiting);
+
+  reg.addEventListener('updatefound', () => {
+    const sw = reg.installing;
+    if (!sw) return;
+    sw.addEventListener('statechange', () => {
+      // No controller means this is the very first install — nothing to replace.
+      if (sw.state === 'installed' && navigator.serviceWorker.controller) handOver(sw);
+    });
+  });
+
+  const check = () => reg.update().catch(() => {});
+  setInterval(check, UPDATE_CHECK_MS);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+  window.addEventListener('online', check);
+}
+
 /* ---------- boot ---------- */
 (async function boot() {
   await getSettings();
@@ -97,17 +159,7 @@ window.addEventListener('offline', syncOnline);
   await route();
 
   if ('serviceWorker' in navigator) {
-    try {
-      const reg = await navigator.serviceWorker.register('./sw.js');
-      reg.addEventListener('updatefound', () => {
-        const sw = reg.installing;
-        sw && sw.addEventListener('statechange', () => {
-          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-            ui.toast('Update ready — reopen the app');
-          }
-        });
-      });
-    } catch (e) { console.warn('SW registration failed', e); }
+    try { await setupUpdates(); } catch (e) { console.warn('SW registration failed', e); }
   }
   // Ask for durable storage so iOS does not evict the photo store.
   if (navigator.storage && navigator.storage.persist) {

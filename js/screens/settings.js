@@ -3,7 +3,7 @@ import { getSettings, saveSettings, putBlob, deleteBlob, getBlob, listProjects, 
 import * as db from '../db.js';
 import { ingest, blobUrl } from '../image.js';
 import { exportBackup, importBackup, backupFilename, saveFile } from '../backup.js';
-import { ask, DEFAULT_MODEL } from '../ai.js';
+import { ask, DEFAULT_MODEL, MODEL_CHOICES } from '../ai.js';
 
 export default async function renderSettings() {
   let s = await getSettings(true);
@@ -96,11 +96,23 @@ export default async function renderSettings() {
     const modelRow = ui.inputRow('Model', draft.model, (v) => { draft.model = v; }, { placeholder: DEFAULT_MODEL });
     const modelField = modelRow.querySelector('input');
     const presets = ui.h('div', { class: 'chips scrollrow' },
-      ...['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'].map((m) =>
+      ...MODEL_CHOICES.map((m) =>
         ui.h('button', {
           class: 'chip', text: m,
           onclick: () => { draft.model = m; modelField.value = m; ui.haptic(); },
         })));
+
+    // Auto mode picks the cheapest model that can do each job and steps to
+    // another one by itself when a model is rate limited or unavailable.
+    const manual = ui.h('div', {}, modelRow, presets);
+    const syncAuto = () => {
+      const on = draft.auto !== false;
+      manual.style.opacity = on ? '.4' : '1';
+      manual.style.pointerEvents = on ? 'none' : 'auto';
+    };
+    const autoRow = ui.switchRow('Choose model automatically', draft.auto !== false,
+      (v) => { draft.auto = v; syncAuto(); },
+      'Lite for captions, Flash for batches and text; falls back on rate limits');
 
     const testBtn = ui.h('button', { class: 'btn tinted wide' }, ui.h('span', { text: 'Test connection' }));
     testBtn.onclick = async () => {
@@ -126,13 +138,14 @@ export default async function renderSettings() {
       ui.group('Google AI Studio', [
         ui.switchRow('Enable assistant', draft.enabled, (v) => { draft.enabled = v; }),
         ui.inputRow('API key', draft.key ? '••••••••' + draft.key.slice(-4) : '', (v) => { draft.key = v; }, { placeholder: 'AIza…' }),
-        modelRow,
+        autoRow,
       ]),
-      presets,
+      manual,
       ui.h('div', { class: 'btn-stack' }, testBtn),
       ui.h('div', { class: 'group-note', text: 'Get a key at aistudio.google.com. It is stored on this device only, sent to Google with each request, and is never included in a backup file.' }),
       ui.h('div', { class: 'group-note', text: 'Free-tier keys are rate limited and Google may use free-tier requests to improve their models. Use a billed key for client photos that must stay private.' }));
 
+    syncAuto();
     ui.sheet({
       title: 'AI Assistant', body: body2, rightLabel: 'Save',
       onRight: async () => {
@@ -204,6 +217,18 @@ export default async function renderSettings() {
           return o;
         })),
       }),
+      ui.row({
+        title: 'AI photo detail',
+        sub: 'Size sent to the assistant — smaller uses fewer tokens',
+        right: ui.h('select', {
+          onchange: (e) => set({ aiImagePx: Number(e.target.value) }),
+          style: { border: 0, background: 'none', fontSize: '17px', color: 'var(--label-2)' },
+        }, ...[[512, 'Low'], [768, 'Standard'], [1024, 'High']].map(([v, l]) => {
+          const o = ui.h('option', { value: String(v), text: l });
+          if (v === s.aiImagePx) o.selected = true;
+          return o;
+        })),
+      }),
       ui.row({ title: 'Caption & section library', sub: 'Quick-pick captions used on site', chevron: true, onclick: () => { location.hash = '#/library'; } }),
     ]));
 
@@ -211,7 +236,9 @@ export default async function renderSettings() {
     body.appendChild(ui.group('Assistant', [
       ui.row({
         title: 'AI assistant',
-        sub: s.ai.enabled && s.ai.key ? s.ai.model : 'Google AI Studio (Gemini)',
+        sub: s.ai.enabled && s.ai.key
+          ? (s.ai.auto !== false ? 'Google AI Studio · model chosen automatically' : `Google AI Studio · ${s.ai.model}`)
+          : 'Google AI Studio (Gemini)',
         value: s.ai.enabled && s.ai.key ? 'On' : 'Off',
         iconName: 'sparkle', iconColor: 'var(--sys-indigo)',
         chevron: true, onclick: aiSheet,

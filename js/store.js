@@ -30,10 +30,11 @@ export const DEFAULT_SETTINGS = {
   photosPerPage: 6,
   imageMaxPx: 1600,
   imageQuality: 0.82,
+  aiImagePx: 768,          // one Gemini image tile — cheapest useful size
   captionLib: DEFAULT_CAPTIONS,
   sectionLib: DEFAULT_SECTIONS,
   usage: {},              // caption text -> {n,last,sections{}}
-  ai: { key: '', model: 'gemini-2.5-flash', enabled: false },
+  ai: { key: '', model: 'gemini-2.5-flash', enabled: false, auto: true },
   lastBackupAt: null,
 };
 

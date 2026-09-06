@@ -1,5 +1,5 @@
 // Fast Report service worker — precache the shell so the app opens offline.
-const VERSION = 'v1.0.0';
+const VERSION = 'v1.1.0';
 const CACHE = 'fastreport-' + VERSION;
 
 const SHELL = [
@@ -29,12 +29,11 @@ const SHELL = [
   './icons/icon-180.png',
 ];
 
+// Note: no skipWaiting() here. A new worker stays parked until the page has
+// shown "App is updating" and told it to take over, so assets never swap
+// underneath a session that is mid-capture.
 self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE)
-      .then((c) => c.addAll(SHELL))
-      .then(() => self.skipWaiting())
-  );
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
 });
 
 self.addEventListener('activate', (e) => {

@@ -58,6 +58,22 @@ export async function ingest(file, { maxPx = 1600, quality = 0.82, thumbPx = 320
   return { blob, thumb, meta: { w: big.w, h: big.h, srcW: sw, srcH: sh, size: blob.size, ts: Date.now() } };
 }
 
+/**
+ * Small copy for the assistant. Gemini bills images in 768x768 tiles, so a photo
+ * that fits inside one tile costs about a quarter of what the 1600px report copy
+ * costs, with no useful loss for four-word captions.
+ */
+export async function aiCopy(blob, maxPx = 768, quality = 0.72) {
+  const bmp = await decode(blob);
+  const { w, h } = fit(bmp.width, bmp.height, maxPx);
+  const c = canvasOf(w, h);
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bmp, 0, 0, w, h);
+  if (bmp.close) bmp.close();
+  return toBlob(c, 'image/jpeg', quality);
+}
+
 /** Burn annotation ops into a new JPEG (used for report + share). */
 export async function flatten(srcBlob, ops, { maxPx = 1600, quality = 0.85 } = {}) {
   const bmp = await decode(srcBlob);

@@ -106,19 +106,37 @@ export default async function renderSection(sectionId) {
     }
   }
 
-  async function aiCaptionMany(list) {
-    ui.toast('Asking the assistant…', 60000);
+  async function aiCaptionMany(list, { redo = false } = {}) {
+    let queue = redo ? list : list.filter((p) => !p.caption);
+    if (!queue.length) {
+      const ok = await ui.confirm('Already captioned', 'Replace the existing captions with new suggestions?', { okLabel: 'Replace' });
+      if (!ok) return;
+      queue = list;
+    }
+    ui.toast(`Captioning 0 of ${queue.length}…`, 120000);
+    const items = [];
+    for (const p of queue) items.push({ id: p.id, blob: await getBlob(p.blobId) });
+    let saved = 0;
     try {
-      const items = [];
-      for (const p of list) items.push({ id: p.id, blob: await getBlob(p.blobId) });
-      const lib = settings.captionLib.flatMap((g) => g.items);
-      const out = await suggestCaptionsBatch(items, { sectionTitle: section.title, library: lib });
-      for (let i = 0; i < items.length; i++) {
-        if (out[i]?.text) { await updatePhoto(items[i].id, { caption: out[i].text }); await noteCaptionUse(out[i].text, section.title); }
-      }
-      ui.toast('Captions suggested — review before reporting');
+      await suggestCaptionsBatch(items, {
+        sectionTitle: section.title,
+        // Captions are written as each batch lands, so a rate limit part-way
+        // through never throws away the work already done.
+        onProgress: async (done, total, results, start) => {
+          for (let i = 0; i < results.length; i++) {
+            const text = results[i].text;
+            if (!text) continue;
+            await updatePhoto(items[start + i].id, { caption: text });
+            await noteCaptionUse(text, section.title);
+            saved++;
+          }
+          ui.toast(`Captioning ${done} of ${total}…`, 120000);
+          paint();
+        },
+      });
+      ui.toast(saved ? `${saved} caption(s) suggested — review before reporting` : 'No captions returned');
     } catch (err) {
-      ui.toast(err.message || 'AI unavailable');
+      ui.toast(saved ? `Stopped after ${saved} — ${err.message}` : (err.message || 'AI unavailable'), 4000);
     }
     paint();
   }
@@ -185,8 +203,7 @@ export default async function renderSection(sectionId) {
         const old = label.textContent;
         label.textContent = 'Thinking…';
         try {
-          const lib = settings.captionLib.flatMap((g) => g.items);
-          const r = await suggestCaption(blob, { sectionTitle: section.title, library: lib });
+          const r = await suggestCaption(blob, { sectionTitle: section.title });
           if (r.text) { setCap(r.text); if (r.offline) ui.toast('Offline suggestion from your library'); }
           else ui.toast('No suggestion available');
         } catch (err) { ui.toast(err.message); }
