@@ -4,7 +4,7 @@ import * as db from '../db.js';
 import { ingest, blobUrl } from '../image.js';
 import { exportBackup, importBackup, backupFilename, saveFile } from '../backup.js';
 import { BUILD } from '../build.js';
-import { ask, DEFAULT_MODEL, MODEL_CHOICES, aiEnabled } from '../assist.js';
+import { ask, listModels, modelFor, DEFAULT_MODEL, aiEnabled } from '../assist.js';
 
 export default async function renderSettings() {
   let s = await getSettings(true);
@@ -100,12 +100,24 @@ export default async function renderSettings() {
 
     const modelRow = ui.inputRow('Model', draft.model, (v) => { draft.model = v; }, { placeholder: DEFAULT_MODEL });
     const modelField = modelRow.querySelector('input');
-    const presets = ui.h('div', { class: 'chips scrollrow' },
-      ...MODEL_CHOICES.map((m) =>
-        ui.h('button', {
-          class: 'chip', text: m,
-          onclick: () => { draft.model = m; modelField.value = m; ui.haptic(); },
-        })));
+
+    // Presets come from what the key actually has, not from a hardcoded list:
+    // model names change, and they differ between keys.
+    const presets = ui.h('div', { class: 'chips scrollrow' });
+    const paintPresets = () => {
+      ui.clear(presets);
+      const list = (draft.available || []).filter((m) => !/embedding|aqa|imagen|image-generation|tts|native-audio|live/.test(m));
+      if (!list.length) {
+        presets.appendChild(ui.h('div', { class: 'hint', style: { padding: '0 4px' },
+          text: 'Tap Test connection to load the models available to this key.' }));
+        return;
+      }
+      list.forEach((m) => presets.appendChild(ui.h('button', {
+        class: 'chip', text: m,
+        onclick: () => { draft.model = m; modelField.value = m; ui.haptic(); },
+      })));
+    };
+    paintPresets();
 
     // Auto mode picks the cheapest model that can do each job and steps to
     // another one by itself when a model is rate limited or unavailable.
@@ -117,19 +129,31 @@ export default async function renderSettings() {
     };
     const autoRow = ui.switchRow('Choose model automatically', draft.auto !== false,
       (v) => { draft.auto = v; syncAuto(); },
-      'Lite for captions, Flash for batches and text; falls back on rate limits');
+      'Cheapest first, matched to what your key has; falls back on rate limits');
 
     const testBtn = ui.h('button', { class: 'btn tinted wide' }, ui.h('span', { text: 'Test connection' }));
     testBtn.onclick = async () => {
       const label = testBtn.querySelector('span');
       const key = resolveKey();
       if (!key) { ui.toast('Enter an API key first'); return; }
-      testBtn.disabled = true; label.textContent = 'Testing\u2026';
+      testBtn.disabled = true;
       const prev = { ...s.ai };
       try {
+        // Ask the key what it has, then prove one of those models answers.
+        label.textContent = 'Reading models\u2026';
         await set({ ai: { ...draft, key, enabled: true } });
+        const models = await listModels();
+        if (!models.length) throw new Error('This key has no models that can generate content.');
+        draft.available = models;
+        await set({ ai: { ...draft, key, enabled: true, available: models, checkedAt: Date.now() } });
+        paintPresets();
+
+        label.textContent = 'Testing\u2026';
+        const used = await modelFor('text');
         const reply = await ask('Reply with the single word OK.');
-        ui.toast(reply ? 'Connected \u2014 assistant is working' : 'No reply from the model');
+        if (!reply) throw new Error('The model returned nothing.');
+        await set({ ai: { ...draft, key, enabled: true, available: models, checkedAt: Date.now() } });
+        ui.alert('Connected', `${models.length} model(s) available. Answered on ${used}.`);
       } catch (err) {
         await set({ ai: prev });
         ui.alert('Test failed', err.message);
@@ -272,7 +296,9 @@ export default async function renderSettings() {
       ui.row({
         title: 'AI assistant',
         sub: s.ai.enabled && s.ai.key
-          ? (s.ai.auto !== false ? 'Google AI Studio · model chosen automatically' : `Google AI Studio · ${s.ai.model}`)
+          ? (s.ai.auto !== false
+            ? `Google AI Studio · auto${(s.ai.available || []).length ? ` · ${s.ai.available.length} models` : ' · not tested yet'}`
+            : `Google AI Studio · ${s.ai.model}`)
           : 'Google AI Studio (Gemini)',
         value: s.ai.enabled && s.ai.key ? 'On' : 'Off',
         iconName: 'sparkle', iconColor: 'var(--sys-indigo)',

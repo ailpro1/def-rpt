@@ -33,6 +33,52 @@ const COOLDOWN_MS = 90_000;
 const cooling = new Map();          // model -> timestamp it may be used again
 const isCool = (m) => (cooling.get(m) || 0) < Date.now();
 
+/**
+ * Ask the key which models it actually has. Model names change and differ by
+ * key, so nothing here is hardcoded as fact — the ladder above is a preference
+ * order, and this is the source of truth.
+ */
+export async function listModels() {
+  const s = await getSettings();
+  const key = s.ai?.key;
+  if (!key) throw new Error('No API key set. Add one in Settings > AI Assistant.');
+  if (!isOnline()) throw new Error('Offline — the model list needs a connection.');
+
+  const found = [];
+  let url = `${HOST}?pageSize=200`;
+  for (let page = 0; page < 4 && url; page++) {
+    const res = await fetch(url, { headers: { 'x-goog-api-key': key } });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json()).error?.message || ''; } catch { /* ignore */ }
+      if (res.status === 400 || res.status === 403) throw new Error(`That API key was rejected. ${detail.slice(0, 120)}`);
+      throw new Error(`Could not read the model list (${res.status}).`);
+    }
+    const data = await res.json();
+    (data.models || []).forEach((m) => {
+      if ((m.supportedGenerationMethods || []).includes('generateContent')) {
+        found.push(String(m.name || '').replace(/^models\//, ''));
+      }
+    });
+    url = data.nextPageToken ? `${HOST}?pageSize=200&pageToken=${encodeURIComponent(data.nextPageToken)}` : null;
+  }
+  // Newest-looking first, so the presets in Settings read sensibly.
+  found.sort();
+  return found;
+}
+
+/** Pick the closest model this key really has to the one we wanted. */
+function resolve(wanted, available) {
+  if (!available || !available.length) return wanted;
+  if (available.includes(wanted)) return wanted;
+  const family = /lite/.test(wanted) ? 'lite' : /pro/.test(wanted) ? 'pro' : 'flash';
+  const usable = (m) => !/embedding|aqa|imagen|image-generation|tts|native-audio|live/.test(m);
+  const pick = (test) => available.find((m) => usable(m) && test(m));
+  if (family === 'lite') return pick((m) => /flash/.test(m) && /lite/.test(m)) || pick((m) => /flash/.test(m)) || pick(() => true) || wanted;
+  if (family === 'pro') return pick((m) => /pro/.test(m) && !/vision/.test(m)) || pick((m) => /flash/.test(m)) || pick(() => true) || wanted;
+  return pick((m) => /flash/.test(m) && !/lite/.test(m)) || pick((m) => /flash/.test(m)) || pick(() => true) || wanted;
+}
+
 export const isOnline = () => navigator.onLine;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -42,7 +88,11 @@ export async function aiReady() {
 }
 
 class Retryable extends Error {
-  constructor(message, { cooldown = false } = {}) { super(message); this.cooldown = cooldown; }
+  constructor(message, { cooldown = false, missing = false } = {}) {
+    super(message);
+    this.cooldown = cooldown;
+    this.missing = missing;
+  }
 }
 
 /** One generateContent call against a named model. */
@@ -71,7 +121,9 @@ async function callModel(model, key, parts, { system, maxTokens, temperature }) 
     let detail = '';
     try { const j = await res.json(); detail = (j.error && j.error.message) || ''; } catch { /* non-JSON body */ }
     if (res.status === 429) throw new Retryable('Rate limit reached on this key.', { cooldown: true });
-    if (res.status === 404) throw new Retryable(`Model "${model}" was not found.`, { cooldown: true });
+    if (res.status === 404) {
+      throw new Retryable(`Model "${model}" is not available for this key.`, { cooldown: true, missing: true });
+    }
     if (res.status >= 500) throw new Retryable('Google AI Studio is unavailable right now.');
     if (res.status === 400 && /API key not valid/i.test(detail)) throw new Error('That API key was rejected. Check it in Settings > AI Assistant.');
     if (res.status === 403) throw new Error('The API key is not authorised for this request.');
@@ -103,7 +155,9 @@ async function run(task, parts, { system, maxTokens = 1024, temperature = 0.2 } 
   if (!isOnline()) throw new Error('Offline — AI features need a connection.');
 
   const auto = s.ai.auto !== false;
-  const ladder = auto ? (LADDER[task] || LADDER.text) : [s.ai.model || DEFAULT_MODEL];
+  const available = s.ai.available;
+  const wanted = auto ? (LADDER[task] || LADDER.text) : [s.ai.model || DEFAULT_MODEL];
+  const ladder = [...new Set(wanted.map((m) => resolve(m, available)))];
   const ready = ladder.filter(isCool);
   const order = ready.length ? ready : ladder;   // everything cooling: try anyway
 
@@ -116,6 +170,10 @@ async function run(task, parts, { system, maxTokens = 1024, temperature = 0.2 } 
       if (err.cooldown) cooling.set(model, Date.now() + COOLDOWN_MS);
       last = err;
     }
+  }
+  // A model that does not exist will not start existing in four seconds.
+  if (last && last.missing) {
+    throw new Error(`${last.message} Tap Test connection to refresh the model list for this key.`);
   }
   // One paced retry on the preferred model — free-tier limits are per minute.
   await sleep(4000);
@@ -245,6 +303,14 @@ export async function draftSummary(project, sections) {
       + 'Use only the items listed. Output the summary text only.',
     maxTokens: 900, temperature: 0.3,
   });
+}
+
+/** Which model a task would use right now, after resolution. */
+export async function modelFor(task = 'text') {
+  const s = await getSettings();
+  const auto = s.ai.auto !== false;
+  const wanted = auto ? (LADDER[task] || LADDER.text) : [s.ai.model || DEFAULT_MODEL];
+  return resolve(wanted[0], s.ai.available);
 }
 
 /** Free-form assistant used by the chat sheet. */

@@ -38,6 +38,16 @@ export async function ask(question, context) {
   return (await ai()).ask(question, context);
 }
 
+export async function listModels() {
+  if (!BUILD.ai) return [];
+  return (await ai()).listModels();
+}
+
+export async function modelFor(task = 'text') {
+  if (!BUILD.ai) return null;
+  return (await ai()).modelFor(task);
+}
+
 export async function openAssistant(project) {
   if (!BUILD.ai) return;
   const mod = await import('./screens/assistant.js');

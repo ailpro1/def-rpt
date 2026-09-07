@@ -216,15 +216,25 @@ Settings → Assistant → AI assistant. Enable it, paste a Google AI Studio key
 
 ### Model selection
 
-**Choose model automatically** is on by default. Each job runs on the cheapest model
-that can do it, and steps to the next one by itself when a model is rate limited,
-missing or returns nothing:
+**Test connection** asks your key which models it has (`GET /v1beta/models`), keeps
+the list, and offers it as the presets. Model names change over time and differ
+between keys, so nothing is hardcoded as fact — the ladder below is a preference
+order, and the stored list is the source of truth.
 
-| Job | Order tried |
+**Choose model automatically** is on by default. Each job asks for the cheapest model
+that can do it; the request is then resolved to the closest model the key really has
+(by family — lite, flash, pro), and steps to the next one by itself when a model is
+rate limited, missing or returns nothing:
+
+| Job | Preference |
 |---|---|
-| Single caption | `flash-lite` → `flash` |
-| Batch captions | `flash` → `flash-lite` |
-| Summary, chat | `flash` → `flash-lite` |
+| Single caption | lite → flash |
+| Batch captions | flash → lite |
+| Summary, chat | flash → lite |
+
+So a key that has `gemini-flash-lite-latest` but not `gemini-2.5-flash-lite` still
+works, with no configuration. A model that genuinely does not exist is reported as
+such rather than retried.
 
 A model that returns 429 is put on a 90-second cooldown and skipped until it clears.
 After the ladder is exhausted the app waits 4 seconds and retries once, because
