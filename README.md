@@ -169,10 +169,27 @@ screen flags photos whose capture time sits more than two days from the inspecti
 date, works out the common offset, and offers to move them all onto the inspection
 date keeping each photo's time of day — or to change the inspection date instead.
 
-Pages are laid out at true A4 and scaled down only for the screen, so print output
-is 1:1.
+Pages are laid out at true A4 and scaled down only for the screen.
 
-**On iPhone:** tap Print, pinch out on the preview, then share to Files to save a PDF.
+### Save PDF
+
+**Save PDF** writes the file itself — the app contains a small PDF writer
+(`js/pdf.js`) and lays the report out from the data (`js/report-pdf.js`), then hands
+you the file through the share sheet.
+
+This exists because Safari and Chrome stamp their own header and footer onto printed
+output — the page address, the date, their own page numbering — and a page cannot
+switch that off. A report going to a client cannot carry
+`ailpro1.github.io/def-rpt` across the bottom. Written directly, the PDF carries
+nothing but the report.
+
+- True A4 (595.28 × 841.89 pt), one page per report page
+- Photos embedded byte-for-byte as JPEG (`DCTDecode`) — no re-encoding, no quality loss
+- Base-14 fonts, so nothing is embedded and the file stays small
+- Filename from the project: `IR-2026-014 - No 4 Klebang Seroja - 2026-09-05.pdf`
+- `Print instead` is still there in Report Options if you want the browser dialog
+
+Roughly 300 KB per ten photos, so a 150-photo job lands around 40 MB.
 
 ## Project layout
 
@@ -191,6 +208,8 @@ js/ai.js                Google AI Studio (Gemini) calls (optional)
 js/backup.js            export / import / share
 js/ui.js                DOM helpers, sheets, alerts, rows
 js/screens/*.js         one module per screen
+js/pdf.js               minimal PDF writer (pages, text, rules, JPEG images)
+js/report-pdf.js        lays the report out as a PDF, from the data
 js/build.js             build profile — the only file that differs per app
 js/assist.js            the assistant's public surface; loads ai.js on demand
 js/fallback.js           what the assistant features do with no AI
@@ -285,7 +304,7 @@ Android and on Safari on iOS 16.4+.
 |---|---|---|
 | Install | "Install app" prompt, or menu → Add to Home screen | Share → Add to Home Screen |
 | Storage eviction | Rare | Stricter; the app requests persistent storage |
-| Save as PDF | Print → Save as PDF | Print, pinch out on the preview, share to Files |
+| Save PDF | Share sheet, or a download | Share sheet → Save to Files |
 | Share a file | Works | Works |
 | EXIF capture time | Read | Read |
 

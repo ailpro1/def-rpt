@@ -7,6 +7,8 @@ import {
 } from '../store.js';
 import { blobUrl } from '../image.js';
 import { draftSummary, aiReady, aiEnabled } from '../assist.js';
+import { buildReportPdf, reportFilename } from '../report-pdf.js';
+import { saveFile } from '../backup.js';
 
 const MM = 96 / 25.4;
 
@@ -39,7 +41,7 @@ export default async function renderReport(projectId) {
     left: ui.backBtn(() => go('#/project/' + projectId), 'Project'),
     right: ui.h('span', { style: { display: 'flex' } },
       ui.navBtn('', optionsSheet, { icon: 'more' }),
-      ui.navBtn('', () => window.print(), { icon: 'print' })),
+      ui.navBtn('', savePdf, { icon: 'down' })),
   }));
   screen.appendChild(scroll);
 
@@ -67,11 +69,12 @@ export default async function renderReport(projectId) {
         }),
       ]),
       ui.h('div', { class: 'btn-stack' },
-        ui.h('button', { class: 'btn wide', onclick: () => { window.print(); }, text: 'Print / Save as PDF' }),
+        ui.h('button', { class: 'btn wide', onclick: savePdf, text: 'Save PDF' }),
         aiEnabled
           ? ui.h('button', { class: 'btn tinted wide', onclick: aiSummary, text: 'Draft summary with AI' })
-          : null),
-      ui.h('div', { class: 'group-note', text: 'On iPhone: Print, then pinch out on the preview and share to Files to save a PDF.' }));
+          : null,
+        ui.h('button', { class: 'btn gray wide', onclick: () => window.print(), text: 'Print instead' })),
+      ui.h('div', { class: 'group-note', text: 'Save PDF writes the file itself, so it carries none of the browser\u2019s own page header or footer. Print goes through Safari or Chrome, which add the page address and date.' }));
     ui.sheet({ title: 'Report Options', body, leftLabel: 'Done' });
   }
 
@@ -90,6 +93,31 @@ export default async function renderReport(projectId) {
       ui.toast('Summary updated');
       build();
     } catch (err) { ui.toast(err.message || 'Could not draft summary'); }
+  }
+
+  /* ---------------- PDF ---------------- */
+  async function savePdf() {
+    const sections = await listSections(projectId);
+    const data = [];
+    for (const sec of sections) {
+      const photos = await listPhotos(sec.id);
+      if (opts.skipEmpty && !photos.length) continue;
+      data.push({ section: sec, photos });
+    }
+    if (!data.length) { ui.toast('Nothing to report yet — add photos first'); return; }
+
+    const total = data.reduce((n, d) => n + d.photos.length, 0);
+    ui.toast(`Writing PDF (${total} photo${total === 1 ? '' : 's'})\u2026`, 120000);
+    try {
+      const blob = await buildReportPdf({ project, settings, data, opts });
+      const name = reportFilename(project);
+      const how = await saveFile(blob, name);
+      if (how === 'cancelled') ui.toast('Cancelled');
+      else ui.toast(`${name} \u2014 ${ui.fmtBytes(blob.size)}`, 3500);
+    } catch (err) {
+      console.error(err);
+      ui.alert('Could not write the PDF', err.message || String(err));
+    }
   }
 
   /* ---------------- page helpers ---------------- */
