@@ -139,8 +139,12 @@ Title:  NO. 4 KLEBANG SEROJA        Group:  CAR PORCH
  [photo]              [photo]
  ...
 ──────────────────────────────────────────────────────────────
- NO. 4, JALAN KLEBANG SEROJA 6, ...               page 1 of 3
+ NO. 4, JALAN KLEBANG SEROJA 6, ...              page 4 of 17
 ```
+
+Page numbers run through the whole report by default — `page 4 of 17` — so the
+number matches the page you are on in the PDF. Settings → **Page numbers** →
+*Per section* restores the older style that restarts at each section.
 
 **Title** is the project, **Group** is the section. The address prints in the footer
 of every page (or Settings → Page footer, if you set your own). Each photo carries its

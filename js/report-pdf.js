@@ -60,10 +60,21 @@ export async function buildReportPdf({ project, settings, data, opts }) {
     subject: project.address || '',
   });
   const footLeft = settings.footerText || project.address || '';
+  const perSection = opts.numbering === 'section';
+
+  // Page counts are worked out before anything is drawn, so a footer can say
+  // "page 4 of 17" on the page where it is printed.
+  const sectionPages = data.map((d) => Math.max(1, Math.ceil(d.photos.length / opts.perPage)));
+  const totalPages = (opts.cover ? 1 : 0)
+    + (opts.summary ? 1 : 0)
+    + (opts.notes && settings.notesBody ? 1 : 0)
+    + sectionPages.reduce((a, b) => a + b, 0);
+  let pageNo = 0;
+  const nextPage = () => { doc.page(); return ++pageNo; };
 
   /* ---------- cover ---------- */
   if (opts.cover) {
-    doc.page();
+    nextPage();
     let y = L.top + 6;
     if (settings.logoBlobId) {
       const logo = await bytesOf(settings.logoBlobId);
@@ -106,7 +117,7 @@ export async function buildReportPdf({ project, settings, data, opts }) {
 
   /* ---------- executive summary ---------- */
   if (opts.summary) {
-    doc.page();
+    nextPage();
     header(doc, project.name, settings.summaryTitle || 'EXECUTIVE SUMMARY');
     let y = gridTop;
     y += doc.textBlock(project.summaryOverride || settings.summaryBody || '', L.side, y, contentW,
@@ -146,16 +157,16 @@ export async function buildReportPdf({ project, settings, data, opts }) {
         y += rowH;
       });
     }
-    footer(doc, footLeft, '');
+    footer(doc, footLeft, perSection ? '' : `page ${pageNo} of ${totalPages}`);
     if (opts.draft) draftMark(doc);
   }
 
   /* ---------- notes ---------- */
   if (opts.notes && settings.notesBody) {
-    doc.page();
+    nextPage();
     header(doc, project.name, settings.notesTitle || 'NOTES & LIMITATIONS');
     doc.textBlock(settings.notesBody, L.side, gridTop, contentW, { size: 10, lineHeight: 1.5 });
-    footer(doc, footLeft, '');
+    footer(doc, footLeft, perSection ? '' : `page ${pageNo} of ${totalPages}`);
     if (opts.draft) draftMark(doc);
   }
 
@@ -174,7 +185,7 @@ export async function buildReportPdf({ project, settings, data, opts }) {
     if (!chunks.length) chunks.push([]);
 
     for (let c = 0; c < chunks.length; c++) {
-      doc.page();
+      nextPage();
       header(doc, project.name, d.section.title);
 
       for (let i = 0; i < chunks[c].length; i++) {
@@ -200,7 +211,9 @@ export async function buildReportPdf({ project, settings, data, opts }) {
         }
       }
 
-      footer(doc, footLeft, `page ${c + 1} of ${chunks.length}`);
+      footer(doc, footLeft, perSection
+        ? `page ${c + 1} of ${chunks.length}`
+        : `page ${pageNo} of ${totalPages}`);
       if (opts.draft) draftMark(doc);
     }
   }

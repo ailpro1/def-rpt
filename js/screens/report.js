@@ -33,6 +33,7 @@ export default async function renderReport(projectId) {
     perPage: settings.photosPerPage || 6,
     skipEmpty: true,
     stamp: settings.stampEnabled !== false,
+    numbering: settings.pageNumbering || 'document',
   };
 
   screen.appendChild(ui.navbar({
@@ -56,6 +57,17 @@ export default async function renderReport(projectId) {
         ui.switchRow('Photo timestamps', opts.stamp, (v) => { opts.stamp = v; build(); }, 'Capture time on each photo'),
       ]),
       ui.group('Layout', [
+        ui.row({
+          title: 'Page numbers',
+          right: ui.h('select', {
+            onchange: (e) => { opts.numbering = e.target.value; build(); },
+            style: { border: 0, background: 'none', fontSize: '15px', color: 'var(--label-2)' },
+          }, ...[['document', 'Whole report'], ['section', 'Per section']].map(([v, label]) => {
+            const o = ui.h('option', { value: v, text: label });
+            if (v === opts.numbering) o.selected = true;
+            return o;
+          })),
+        }),
         ui.row({
           title: 'Photos per page',
           right: ui.h('select', {
@@ -177,6 +189,13 @@ export default async function renderReport(projectId) {
 
     // Address is no longer in the header, so it rides in the footer instead.
     const footerLeft = settings.footerText || project.address || '';
+    const perSection = opts.numbering === 'section';
+    const sectionPages = data.map((d) => Math.max(1, Math.ceil(d.photos.length / opts.perPage)));
+    const totalPages = (opts.cover ? 1 : 0)
+      + (opts.summary ? 1 : 0)
+      + (opts.notes && settings.notesBody ? 1 : 0)
+      + sectionPages.reduce((a, b) => a + b, 0);
+    let pageNo = 0;
     const pages = [];
 
     /* cover */
@@ -189,6 +208,7 @@ export default async function renderReport(projectId) {
         ui.h('div', { class: 'c-title', text: settings.reportTitle || 'DEFECT INSPECTION REPORT' }),
         ui.h('div', { class: 'c-rule' }),
         ui.h('div', { class: 'c-sub', text: [project.name, project.address].filter(Boolean).join('\n') }));
+      pageNo++;
       const coverBody = project.coverOverride || settings.coverBody;
       if (coverBody) c.appendChild(ui.h('div', { class: 'c-body', text: coverBody }));
       const meta = ui.h('table', { class: 'c-meta' }, ui.h('tbody', {},
@@ -232,7 +252,8 @@ export default async function renderReport(projectId) {
               ui.h('td', { class: 'n', html: `<b>${total[2]}</b>` }))));
         s.appendChild(table);
       }
-      s.appendChild(footer(footerLeft, ''));
+      pageNo++;
+      s.appendChild(footer(footerLeft, perSection ? '' : `page ${pageNo} of ${totalPages}`));
       pages.push(s);
     }
 
@@ -241,7 +262,8 @@ export default async function renderReport(projectId) {
       const n = page('rtext');
       n.appendChild(sectionHeader(settings.notesTitle || 'NOTES & LIMITATIONS'));
       n.appendChild(ui.h('div', { class: 'body', text: settings.notesBody }));
-      n.appendChild(footer(footerLeft, ''));
+      pageNo++;
+      n.appendChild(footer(footerLeft, perSection ? '' : `page ${pageNo} of ${totalPages}`));
       pages.push(n);
     }
 
@@ -258,7 +280,10 @@ export default async function renderReport(projectId) {
         g.style.setProperty('--rows', String(rows()));
         for (const p of chunks[i]) g.appendChild(await photoCell(p));
         pg.appendChild(g);
-        pg.appendChild(footer(footerLeft, `page ${i + 1} of ${chunks.length}`));
+        pageNo++;
+        pg.appendChild(footer(footerLeft, perSection
+          ? `page ${i + 1} of ${chunks.length}`
+          : `page ${pageNo} of ${totalPages}`));
         pages.push(pg);
       }
     }

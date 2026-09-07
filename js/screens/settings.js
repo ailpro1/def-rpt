@@ -219,6 +219,18 @@ export default async function renderSettings() {
       ui.switchRow('Summary table', s.summaryTableEnabled, (v) => set({ summaryTableEnabled: v }), 'Photo and item counts per location'),
       ui.switchRow('Notes & limitations page', s.notesEnabled, (v) => set({ notesEnabled: v })),
       ui.row({ title: 'Notes text', sub: s.notesBody ? s.notesBody.slice(0, 60) + '…' : 'Not set', chevron: true, onclick: () => editTextSheet('Notes & limitations', 'notesBody', 'Scope, method and limitations') }),
+      ui.row({
+        title: 'Page numbers',
+        sub: s.pageNumbering === 'section' ? 'Restarts at each section, like the older reports' : 'Runs through the whole report',
+        right: ui.h('select', {
+          onchange: (e) => set({ pageNumbering: e.target.value }).then(paint),
+          style: { border: 0, background: 'none', fontSize: '15px', color: 'var(--label-2)' },
+        }, ...[['document', 'Whole report'], ['section', 'Per section']].map(([v, label]) => {
+          const o = ui.h('option', { value: v, text: label });
+          if (v === (s.pageNumbering || 'document')) o.selected = true;
+          return o;
+        })),
+      }),
       ui.inputRow('Page footer', s.footerText, (v) => set({ footerText: v }), { placeholder: 'Left side of the page footer' }),
     ]));
 

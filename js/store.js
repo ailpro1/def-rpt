@@ -29,6 +29,7 @@ export const DEFAULT_SETTINGS = {
   notesBody: '',
   footerText: '',
   photosPerPage: 6,
+  pageNumbering: 'document',   // 'document' = page 4 of 17; 'section' = the older per-section style
   stampEnabled: true,
   stampFormat: 'ymd24',    // 2026.08.15 17:23 — matches the sample reports
   stampPosition: 'br',
