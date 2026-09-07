@@ -1,8 +1,8 @@
 {
-  "name": "Fast Report — Inspection Reports",
-  "short_name": "Fast Report",
+  "name": "Insta Report — Inspection Reports",
+  "short_name": "Insta Report",
   "description": "Offline-first home building inspection report generator with fast captions, photo annotation and one-tap PDF output.",
-  "id": "/fast-report/",
+  "id": "./",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

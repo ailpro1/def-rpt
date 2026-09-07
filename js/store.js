@@ -1,5 +1,6 @@
 // Domain layer: projects, sections, photos, settings.
 import * as db from './db.js';
+import { BUILD } from './build.js';
 import { DEFAULT_CAPTIONS, DEFAULT_SECTIONS } from './captions.js';
 
 export const SETTINGS_ID = 'app';
@@ -32,7 +33,7 @@ export const DEFAULT_SETTINGS = {
   stampFormat: 'ymd24',    // 2026.08.15 17:23 — matches the sample reports
   stampPosition: 'br',
   stampInShare: true,
-  imageMaxPx: 1600,
+  imageMaxPx: BUILD.defaultImageMaxPx || 1600,
   imageQuality: 0.82,
   aiImagePx: 768,          // one Gemini image tile — cheapest useful size
   captionLib: DEFAULT_CAPTIONS,
@@ -296,6 +297,55 @@ export async function projectStats(projectId) {
   photos.forEach((p) => { bySection[p.sectionId] = (bySection[p.sectionId] || 0) + 1; });
   const defects = photos.filter((p) => !isOkCaption(p.caption)).length;
   return { sections: sections.length, photos: photos.length, defects, bySection };
+}
+
+/**
+ * Photos whose capture time does not sit near the inspection date. A site phone
+ * with a wrong clock stamps every photo months out, and that only shows up once
+ * the report is being written — so surface it on the project screen.
+ */
+export async function timeAnomalies(projectId, { toleranceDays = 2 } = {}) {
+  const project = await getProject(projectId);
+  if (!project) return { total: 0, offDate: [], noSource: [], offsetDays: 0 };
+  const photos = await listProjectPhotos(projectId);
+  const base = project.inspectionDate ? new Date(project.inspectionDate + 'T12:00:00').getTime() : null;
+  const window = toleranceDays * 864e5;
+
+  const offDate = [];
+  const noSource = [];
+  const deltas = [];
+  photos.forEach((p) => {
+    if (p.takenSource === 'now' || !photoTakenAt(p)) { noSource.push(p); return; }
+    if (base === null) return;
+    const delta = photoTakenAt(p) - base;
+    if (Math.abs(delta) > window) { offDate.push(p); deltas.push(delta); }
+  });
+
+  // A single consistent offset means one wrong clock, which is correctable in bulk.
+  deltas.sort((a, b) => a - b);
+  const median = deltas.length ? deltas[Math.floor(deltas.length / 2)] : 0;
+  return {
+    total: photos.length,
+    offDate,
+    noSource,
+    offsetDays: Math.round(median / 864e5),
+  };
+}
+
+/** Move a set of photos onto the inspection date, keeping each time of day. */
+export async function retimeToDate(photoIds, isoDate) {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const updated = [];
+  for (const id of photoIds) {
+    const p = await getPhoto(id);
+    if (!p) continue;
+    const was = new Date(photoTakenAt(p) || p.createdAt);
+    const next = new Date(y, m - 1, d, was.getHours(), was.getMinutes(), was.getSeconds());
+    updated.push({ ...p, takenAt: next.getTime(), takenSource: 'corrected' });
+  }
+  await db.putMany(db.STORES.photos, updated);
+  if (updated[0]) await touch(updated[0].projectId);
+  return updated.length;
 }
 
 export function isOkCaption(text) {

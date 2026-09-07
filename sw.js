@@ -1,6 +1,6 @@
-// Fast Report service worker — precache the shell so the app opens offline.
+// Insta Report service worker — precache the shell so the app opens offline.
 const VERSION = 'v1.2.0';
-const CACHE = 'fastreport-' + VERSION;
+const CACHE = (self.APP_CACHE_PREFIX || 'instareport-admin-') + VERSION;
 
 const SHELL = [
   './',
@@ -9,6 +9,9 @@ const SHELL = [
   './css/app.css',
   './css/report.css',
   './js/app.js',
+  './js/build.js',
+  './js/assist.js',
+  './js/fallback.js',
   './js/ui.js',
   './js/db.js',
   './js/store.js',

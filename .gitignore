@@ -2,3 +2,5 @@ node_modules/
 package-lock.json
 *.tmp.mjs
 .DS_Store
+
+dist/

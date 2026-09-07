@@ -3,7 +3,8 @@ import { getSettings, saveSettings, putBlob, deleteBlob, getBlob, listProjects, 
 import * as db from '../db.js';
 import { ingest, blobUrl } from '../image.js';
 import { exportBackup, importBackup, backupFilename, saveFile } from '../backup.js';
-import { ask, DEFAULT_MODEL, MODEL_CHOICES } from '../ai.js';
+import { BUILD } from '../build.js';
+import { ask, DEFAULT_MODEL, MODEL_CHOICES, aiEnabled } from '../assist.js';
 
 export default async function renderSettings() {
   let s = await getSettings(true);
@@ -64,10 +65,14 @@ export default async function renderSettings() {
 
   async function backupSheet() {
     const projects = await listProjects();
-    const pick = await ui.actionSheet('Backup', [
-      { label: 'Full backup', value: 'all', icon: 'down', color: 'var(--sys-blue)', primary: true, sub: 'Projects, photos and settings' },
-      { label: 'One project only', value: 'one', icon: 'folder', color: 'var(--sys-teal)', sub: 'Hand a job to a colleague' },
-    ]);
+    // The capture build only ever sends one job at a time: a project file cannot
+    // overwrite the office's company details, logo or caption library.
+    const pick = BUILD.fullBackup
+      ? await ui.actionSheet('Backup', [
+        { label: 'Full backup', value: 'all', icon: 'down', color: 'var(--sys-blue)', primary: true, sub: 'Projects, photos and settings' },
+        { label: 'One project only', value: 'one', icon: 'folder', color: 'var(--sys-teal)', sub: 'Hand a job to a colleague' },
+      ])
+      : 'one';
     if (!pick) return;
     let ids = null; let label = 'all';
     if (pick === 'one') {
@@ -217,7 +222,7 @@ export default async function renderSettings() {
           return o;
         })),
       }),
-      ui.row({
+      !aiEnabled ? null : ui.row({
         title: 'AI photo detail',
         sub: 'Size sent to the assistant — smaller uses fewer tokens',
         right: ui.h('select', {
@@ -263,7 +268,7 @@ export default async function renderSettings() {
     ]));
 
     /* AI */
-    body.appendChild(ui.group('Assistant', [
+    if (aiEnabled) body.appendChild(ui.group('Assistant', [
       ui.row({
         title: 'AI assistant',
         sub: s.ai.enabled && s.ai.key
@@ -278,7 +283,11 @@ export default async function renderSettings() {
     /* backup */
     const est = await db.estimate();
     body.appendChild(ui.group('Backup & Storage', [
-      ui.row({ title: 'Back up now', cls: 'action', iconName: 'down', iconColor: 'var(--sys-blue)', onclick: backupSheet }),
+      ui.row({
+        title: BUILD.fullBackup ? 'Back up now' : 'Export project to send',
+        sub: BUILD.fullBackup ? '' : 'One file per job, for the office',
+        cls: 'action', iconName: 'down', iconColor: 'var(--sys-blue)', onclick: backupSheet,
+      }),
       ui.row({ title: 'Restore from file', cls: 'action', iconName: 'up', iconColor: 'var(--sys-teal)', onclick: () => restoreInput.click() }),
       ui.row({ title: 'Last backup', value: s.lastBackupAt ? ui.fmtDate(s.lastBackupAt) : 'Never' }),
       est ? ui.row({ title: 'Storage used', value: `${ui.fmtBytes(est.usage || 0)} of ${ui.fmtBytes(est.quota || 0)}` }) : null,
@@ -299,7 +308,11 @@ export default async function renderSettings() {
       }),
     ]));
 
-    body.appendChild(ui.h('div', { class: 'group-note', style: { textAlign: 'center', padding: '22px 16px 8px' }, text: 'Fast Report — works offline. Photos and projects stay on this device until you back them up.' }));
+    body.appendChild(ui.h('div', { class: 'group-note', style: { textAlign: 'center', padding: '22px 16px 4px' },
+      text: `${BUILD.name} — works offline. Photos and projects stay on this device until you back them up.` }));
+    body.appendChild(ui.h('div', { class: 'credit' },
+      ui.h('div', { text: 'Built by Ahmad Fudhail' }),
+      ui.h('small', { text: BUILD.id === 'site' ? 'Capture edition' : 'Full edition' })));
   }
 
   await paint();

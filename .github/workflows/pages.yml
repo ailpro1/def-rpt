@@ -1,0 +1,48 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [claude/fast-report-pwa-inspections-8pq7it]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; queue instead of cancelling a half-finished one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # No dependencies to install — the build script is plain Node.
+      - name: Build both apps
+        run: node tools/build.mjs
+      - name: Check the capture build carries no assistant code
+        run: |
+          test ! -f dist/site/js/ai.js
+          test ! -f dist/site/js/screens/assistant.js
+          ! grep -rq "generativelanguage" dist/site/
+          grep -q '"ai": false' dist/site/js/build.js
+          echo "capture build is clean"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

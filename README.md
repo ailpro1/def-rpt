@@ -59,6 +59,14 @@ caption you want is usually the first chip.
 ## Run it
 
 ```bash
+node tools/build.mjs      # writes dist/admin, dist/site and a chooser page
+cd dist && python3 -m http.server 8080
+# open http://localhost:8080
+```
+
+To work on the source directly (single app, full features):
+
+```bash
 npm start          # or any static file server
 # open http://localhost:8080
 ```
@@ -71,8 +79,50 @@ and persistent storage to work.
 
 ### Deploy
 
-Copy the repository to any static host (GitHub Pages, Netlify, S3, an internal web
-server). All paths are relative, so it works from a subdirectory.
+`.github/workflows/pages.yml` builds both apps and publishes `dist/` to GitHub Pages
+on every push. One repo, one branch, one deploy, two installable apps:
+
+```
+https://<user>.github.io/<repo>/          chooser
+https://<user>.github.io/<repo>/site/     Site app
+https://<user>.github.io/<repo>/admin/    Office app
+```
+
+Enable it once under **Settings → Pages → Source: GitHub Actions**.
+
+The workflow fails the build if the Site app still contains any assistant code, so
+the capture app can never start shipping network calls by accident.
+
+Any other static host works too — build, then upload `dist/`. All paths are relative.
+
+### The two builds
+
+`js/build.js` is the only file that differs; `tools/build.mjs` rewrites it per
+variant and deletes what that variant does not ship.
+
+| | Site | Office |
+|---|---|---|
+| `ai` | `false` — `ai.js` and the assistant screen are **absent from the download**, not just hidden | `true` |
+| `dbName` | `instareport-site` | `instareport` |
+| Photo size | 1200px | 1600px |
+| Backup | One project per file only | Full backup or one project |
+| Manifest `id` | `./site/` | `./admin/` |
+
+Separate database names matter: GitHub Pages serves both from one origin, and
+IndexedDB is scoped to the origin, so without this the two apps would share one
+store on a phone that has both installed.
+
+### The handoff
+
+1. Site app: capture the job, caption, annotate.
+2. Settings → **Export project to send** → share the `.json` file (WhatsApp as a
+   document, Drive, AirDrop — a 150-photo job is roughly 40&nbsp;MB, so email will
+   usually refuse it).
+3. Office app: Settings → **Restore from file** → *Merge into this device*.
+4. Finish the captions, draft the summary, print the report.
+
+A single-project file carries no settings, so it cannot overwrite the office's
+company details, logo or caption library.
 
 ## Report layout
 
@@ -110,6 +160,12 @@ the stored image, so it stays switchable and the original photo is never altered
 Each photo's time is shown in its sheet under **Captured** and can be corrected there.
 Times travel in backup files, so a report built on another device keeps them.
 
+**Wrong-clock check.** A site phone set to the wrong date stamps every photo months
+out, and that normally only surfaces while the report is being written. The project
+screen flags photos whose capture time sits more than two days from the inspection
+date, works out the common offset, and offers to move them all onto the inspection
+date keeping each photo's time of day — or to change the inspection date instead.
+
 Pages are laid out at true A4 and scaled down only for the screen, so print output
 is 1:1.
 
@@ -132,7 +188,11 @@ js/ai.js                Google AI Studio (Gemini) calls (optional)
 js/backup.js            export / import / share
 js/ui.js                DOM helpers, sheets, alerts, rows
 js/screens/*.js         one module per screen
+js/build.js             build profile — the only file that differs per app
+js/assist.js            the assistant's public surface; loads ai.js on demand
+js/fallback.js           what the assistant features do with no AI
 tools/make-icons.mjs    regenerates the PWA icons (no dependencies)
+tools/build.mjs         builds dist/admin, dist/site and the chooser
 ```
 
 ## Data model
@@ -201,6 +261,23 @@ client photos that must stay private.
 Only `callModel()` and the small `imagePart()` helper in `js/ai.js` are
 Gemini-specific. Every feature builds provider-neutral prompts, so swapping to
 another vision model is a change to those two functions plus the model ladder.
+
+## Android and iOS
+
+Both apps are built for either. Everything the app relies on — service worker,
+IndexedDB, `<input capture>`, canvas, Web Share, print — works on Chrome/Edge on
+Android and on Safari on iOS 16.4+.
+
+| | Android (Chrome) | iOS (Safari) |
+|---|---|---|
+| Install | "Install app" prompt, or menu → Add to Home screen | Share → Add to Home Screen |
+| Storage eviction | Rare | Stricter; the app requests persistent storage |
+| Save as PDF | Print → Save as PDF | Print, pinch out on the preview, share to Files |
+| Share a file | Works | Works |
+| EXIF capture time | Read | Read |
+
+Firefox on Android has no Web Share for files; backup export falls back to a plain
+download there.
 
 ## Notes
 

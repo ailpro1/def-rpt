@@ -11,10 +11,10 @@
 import { getSettings } from './store.js';
 import { rankCaptions } from './captions.js';
 import { aiCopy } from './image.js';
+import { DEFAULT_MODEL } from './assist.js';
+import { offlineCaption, offlineSummary } from './fallback.js';
 
 const HOST = 'https://generativelanguage.googleapis.com/v1beta/models';
-export const DEFAULT_MODEL = 'gemini-2.5-flash';
-export const MODEL_CHOICES = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
 
 // Cheapest capable model first. Vision captions are short and highly constrained,
 // so Lite handles them; prose and multi-image ordering go to Flash first.
@@ -155,11 +155,8 @@ const CAPTION_SYSTEM =
 
 /** Caption a single photo. Falls back to the offline ranker when unavailable. */
 export async function suggestCaption(blob, { sectionTitle = '' } = {}) {
+  if (!(await aiReady())) return offlineCaption(sectionTitle);
   const s = await getSettings();
-  if (!(await aiReady())) {
-    const ranked = rankCaptions(s.captionLib, s.usage, sectionTitle, 1);
-    return { text: ranked[0]?.text || '', offline: true };
-  }
   const text = await run('caption', [
     await imagePart(blob, s.aiImagePx),
     { text: `Room: ${sectionTitle || 'unspecified'}\nLibrary: ${await libraryHint(sectionTitle)}` },
@@ -238,12 +235,7 @@ function tally(captions) {
 /** Draft the executive summary from the captured defect list. */
 export async function draftSummary(project, sections) {
   const body = sections.map((s) => `${s.title}: ${tally(s.captions) || 'no items'}`).join('\n');
-  if (!(await aiReady())) {
-    const total = sections.reduce((n, s) => n + s.captions.length, 0);
-    return `A total of ${total} item(s) were recorded across ${sections.length} location(s) at ${project.address || project.name}. `
-      + 'Items recorded require rectification by the contractor prior to handover. '
-      + 'Refer to the photographic records in this report for the location and nature of each item.';
-  }
+  if (!(await aiReady())) return offlineSummary(project, sections);
   return run('text', [{
     text: `Property: ${project.name}\nAddress: ${project.address}\nDate: ${project.inspectionDate}\n\nItems by location:\n${body}`,
   }], {
@@ -258,7 +250,7 @@ export async function draftSummary(project, sections) {
 /** Free-form assistant used by the chat sheet. */
 export async function ask(question, context) {
   return run('text', [{ text: `${context ? `${context}\n\n` : ''}${question}` }], {
-    system: 'You are the assistant inside Fast Report, a building defect inspection app. '
+    system: 'You are the assistant inside Insta Report, a building defect inspection app. '
       + 'Answer briefly and practically for a site inspector. British/Australian spelling, metric units. '
       + 'Keep part and defect terminology in English.',
     maxTokens: 1200, temperature: 0.3,

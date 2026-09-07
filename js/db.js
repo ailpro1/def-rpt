@@ -1,6 +1,10 @@
 // Minimal promise wrapper over IndexedDB. All app data lives here so the app
 // is fully functional offline.
-const DB_NAME = 'fastreport';
+import { BUILD } from './build.js';
+
+// Both builds are served from one origin on GitHub Pages, and IndexedDB is
+// scoped to the origin — so the database name has to differ per build.
+const DB_NAME = BUILD.dbName || 'instareport';
 const DB_VERSION = 1;
 
 export const STORES = {

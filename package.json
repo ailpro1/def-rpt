@@ -1,11 +1,12 @@
 {
-  "name": "fast-report",
+  "name": "insta-report",
   "version": "1.0.0",
   "private": true,
   "description": "Offline-first PWA for building defect inspection reports.",
   "type": "module",
   "scripts": {
     "start": "python3 -m http.server 8080",
+    "build": "node tools/build.mjs",
     "icons": "node tools/make-icons.mjs"
   }
 }

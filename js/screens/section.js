@@ -9,7 +9,7 @@ import * as db from '../db.js';
 import { ingest, blobUrl, stampedCopy } from '../image.js';
 import { rankCaptions } from '../captions.js';
 import { openEditor } from './annotate.js';
-import { suggestCaption, suggestCaptionsBatch, aiReady } from '../ai.js';
+import { suggestCaption, suggestCaptionsBatch, aiReady, aiEnabled } from '../assist.js';
 
 export default async function renderSection(sectionId) {
   const section = await db.get(db.STORES.sections, sectionId);
@@ -81,7 +81,7 @@ export default async function renderSection(sectionId) {
   }
 
   async function offerBatchCaption(added) {
-    const ready = await aiReady();
+    const ready = aiEnabled && await aiReady();
     const choice = await ui.actionSheet(`${added.length} photos added`, [
       ready ? { label: 'AI caption all', value: 'ai', icon: 'sparkle', color: 'var(--sys-indigo)', sub: 'Suggests a caption for each photo' } : null,
       { label: 'Caption one by one', value: 'one', icon: 'pencil', color: 'var(--sys-blue)', primary: true },
@@ -196,7 +196,7 @@ export default async function renderSection(sectionId) {
       ui.h('div', { class: 'chips', style: { paddingTop: '0' } },
         ...g.items.map((t) => ui.h('button', { class: 'chip', text: t.replace(/\n/g, ' · '), onclick: () => setCap(t) })))));
 
-    const aiBtn = ui.h('button', {
+    const aiBtn = !aiEnabled ? null : ui.h('button', {
       class: 'btn tinted wide',
       onclick: async () => {
         aiBtn.disabled = true;
@@ -212,6 +212,7 @@ export default async function renderSection(sectionId) {
         aiBtn.disabled = false;
       },
     }, ui.icon('sparkle', 20), ui.h('span', { text: 'Suggest caption' }));
+    if (aiBtn) aiBtn.dataset.role = 'suggest';
 
     const stampRow = ui.row({
       title: 'Captured',
@@ -337,11 +338,11 @@ export default async function renderSection(sectionId) {
       ui.h('div', { class: 'hint', style: { textAlign: 'center' }, text: n ? `${n} selected` : 'Tap photos to select' }),
       ui.h('button', { class: 'btn wide', disabled: !n, text: 'Apply caption to selected', onclick: applyCaptionToSelected }),
       ui.h('button', { class: 'btn tinted wide', disabled: !n, text: 'Move to another section', onclick: moveSelected }),
-      ui.h('button', { class: 'btn gray wide', disabled: !n, text: 'AI caption selected', onclick: async () => {
+      aiEnabled ? ui.h('button', { class: 'btn gray wide', disabled: !n, text: 'AI caption selected', onclick: async () => {
         const list = photos.filter((p) => selected.has(p.id));
         if (!(await aiReady())) { ui.toast('Turn on the AI assistant in Settings'); return; }
         await aiCaptionMany(list); toggleSelect(false);
-      } }),
+      } }) : null,
       ui.h('button', { class: 'btn danger wide', disabled: !n, text: 'Delete selected', onclick: deleteSelected }),
       ui.h('button', { class: 'btn gray wide', text: 'Done', onclick: () => toggleSelect(false) }));
   }

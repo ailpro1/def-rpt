@@ -1,6 +1,6 @@
 // Ask-the-assistant sheet. Online only; the rest of the app never depends on it.
 import * as ui from '../ui.js';
-import { ask, aiReady } from '../ai.js';
+import { ask, aiReady } from '../assist.js';
 import { listSections, listPhotos } from '../store.js';
 
 const QUICK = [

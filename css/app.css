@@ -1,4 +1,4 @@
-/* Fast Report — iOS-flavoured design system */
+/* Insta Report — iOS-flavoured design system */
 :root{
   --sys-blue:#007aff; --sys-green:#34c759; --sys-red:#ff3b30; --sys-orange:#ff9500;
   --sys-yellow:#ffcc00; --sys-gray:#8e8e93; --sys-teal:#30b0c7; --sys-indigo:#5856d6;
@@ -241,3 +241,7 @@ svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.9;stroke
   text-align:center;box-shadow:0 12px 40px #00000038;max-width:78vw}
 .updating .u-box p{margin:12px 0 0;font-size:16px;font-weight:600;letter-spacing:-.01em}
 .updating .u-box small{display:block;margin-top:5px;font-size:13px;color:var(--label-2);font-weight:400}
+
+/* ---------- credit ---------- */
+.credit{text-align:center;padding:6px 16px 26px;color:var(--label-3);font-size:12px;letter-spacing:.01em}
+.credit small{display:block;margin-top:2px;font-size:11px;color:var(--label-3)}

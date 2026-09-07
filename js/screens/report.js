@@ -6,7 +6,7 @@ import {
   displayBlobId, isOkCaption, updateProject, photoTakenAt,
 } from '../store.js';
 import { blobUrl } from '../image.js';
-import { draftSummary, aiReady } from '../ai.js';
+import { draftSummary, aiReady, aiEnabled } from '../assist.js';
 
 const MM = 96 / 25.4;
 
@@ -68,7 +68,9 @@ export default async function renderReport(projectId) {
       ]),
       ui.h('div', { class: 'btn-stack' },
         ui.h('button', { class: 'btn wide', onclick: () => { window.print(); }, text: 'Print / Save as PDF' }),
-        ui.h('button', { class: 'btn tinted wide', onclick: aiSummary, text: 'Draft summary with AI' })),
+        aiEnabled
+          ? ui.h('button', { class: 'btn tinted wide', onclick: aiSummary, text: 'Draft summary with AI' })
+          : null),
       ui.h('div', { class: 'group-note', text: 'On iPhone: Print, then pinch out on the preview and share to Files to save a PDF.' }));
     ui.sheet({ title: 'Report Options', body, leftLabel: 'Done' });
   }

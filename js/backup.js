@@ -3,7 +3,7 @@
 import * as db from './db.js';
 import { getSettings } from './store.js';
 
-const FORMAT = 'fastreport-backup';
+const FORMAT = 'instareport-backup';
 const VERSION = 1;
 
 const b64 = (blob) => new Promise((resolve, reject) => {
@@ -52,13 +52,16 @@ export async function exportBackup(projectIds = null, { onProgress } = {}) {
 
 export function backupFilename(label = 'all') {
   const d = new Date().toISOString().slice(0, 10);
-  return `fast-report-${label.replace(/[^\w-]+/g, '-').toLowerCase()}-${d}.json`;
+  return `insta-report-${label.replace(/[^\w-]+/g, '-').toLowerCase()}-${d}.json`;
 }
 
 export async function importBackup(file, { merge = true } = {}) {
   const text = await file.text();
   const data = JSON.parse(text);
-  if (data.format !== FORMAT) throw new Error('Not a Fast Report backup file.');
+  // 'fastreport-backup' is the pre-rename format tag; still accepted.
+  if (data.format !== FORMAT && data.format !== 'fastreport-backup') {
+    throw new Error('Not an Insta Report backup file.');
+  }
 
   if (!merge) {
     await Promise.all([

@@ -3,8 +3,9 @@ import { go, back } from '../app.js';
 import {
   getProject, updateProject, listSections, createSection, updateSection,
   deleteSection, reorderSections, projectStats, getSettings, deleteProject,
+  timeAnomalies, retimeToDate, photoTakenAt,
 } from '../store.js';
-import { openAssistant } from './assistant.js';
+import { openAssistant, aiEnabled } from '../assist.js';
 
 export default async function renderProject(id) {
   const project = await getProject(id);
@@ -28,11 +29,11 @@ export default async function renderProject(id) {
     const choice = await ui.actionSheet(project.name, [
       { label: 'Edit details', value: 'edit', icon: 'pencil', color: 'var(--sys-blue)' },
       { label: 'Report overrides', value: 'over', icon: 'doc', color: 'var(--sys-indigo)', sub: 'Cover & summary for this project only' },
-      { label: 'Ask the assistant', value: 'ai', icon: 'sparkle', color: 'var(--sys-indigo)', sub: 'Questions about this inspection' },
+      aiEnabled ? { label: 'Ask the assistant', value: 'ai', icon: 'sparkle', color: 'var(--sys-indigo)', sub: 'Questions about this inspection' } : null,
       { label: 'Add sections from template', value: 'tpl', icon: 'list', color: 'var(--sys-teal)' },
       { label: 'Reorder sections', value: 'order', icon: 'move', color: 'var(--sys-gray)' },
       { label: 'Delete project', value: 'del', icon: 'trash', color: 'var(--sys-red)', destructive: true },
-    ]);
+    ].filter(Boolean));
     if (choice === 'edit') editDetails();
     if (choice === 'over') editOverrides();
     if (choice === 'ai') openAssistant(project);
@@ -154,6 +155,45 @@ export default async function renderProject(id) {
     });
   }
 
+  async function clockSheet(clock) {
+    const suspect = [...clock.offDate, ...clock.noSource];
+    const sections = await listSections(id);
+    const nameOf = (sid) => (sections.find((x) => x.id === sid) || {}).title || 'Unknown';
+    const list = ui.h('div', { class: 'list', style: { margin: '10px 12px' } },
+      ...suspect.slice(0, 40).map((p) => ui.row({
+        title: p.caption ? p.caption.split('\n')[0] : 'Uncaptioned',
+        sub: nameOf(p.sectionId),
+        value: ui.formatStamp(photoTakenAt(p), 'dmy24'),
+      })),
+      suspect.length > 40 ? ui.row({ title: `+ ${suspect.length - 40} more` }) : null);
+
+    const body2 = ui.h('div', {},
+      ui.h('div', { class: 'hint', text: `Inspection date is ${ui.fmtDate(project.inspectionDate)}. `
+        + 'These photos carry a capture time that does not match it, usually because the phone that took them had the wrong date.' }),
+      list,
+      ui.h('div', { class: 'btn-stack' },
+        ui.h('button', {
+          class: 'btn wide',
+          text: `Move all ${suspect.length} to the inspection date`,
+          onclick: async () => {
+            const ok = await ui.confirm('Move capture times?',
+              `Each photo keeps its time of day and moves to ${ui.fmtDate(project.inspectionDate)}.`,
+              { okLabel: 'Move' });
+            if (!ok) return;
+            const n = await retimeToDate(suspect.map((p) => p.id), project.inspectionDate);
+            sh.close();
+            ui.toast(`${n} capture time(s) corrected`);
+            paint();
+          },
+        }),
+        ui.h('button', {
+          class: 'btn gray wide', text: 'Change the inspection date instead',
+          onclick: () => { sh.close(); editDetails(); },
+        })));
+
+    const sh = ui.sheet({ title: 'Capture Times', body: body2, leftLabel: 'Done' });
+  }
+
   async function newSection() {
     const title = await ui.prompt('New Section', 'Printed as the report Title, e.g. MASTER BEDROOM.', '', { okLabel: 'Add' });
     if (title && title.trim()) {
@@ -191,6 +231,33 @@ export default async function renderProject(id) {
       ui.row({ title: 'Date', value: ui.fmtDate(project.inspectionDate) || '—' }),
       ui.row({ title: 'Edit details', cls: 'action', onclick: editDetails }),
     ]));
+
+    /* Clock warning — a site phone with a wrong date poisons every timestamp. */
+    const clock = await timeAnomalies(id);
+    if (clock.offDate.length || clock.noSource.length) {
+      const rows = [];
+      if (clock.offDate.length) {
+        rows.push(ui.row({
+          title: `${clock.offDate.length} photo${clock.offDate.length === 1 ? '' : 's'} dated off the inspection date`,
+          sub: clock.offsetDays
+            ? `About ${Math.abs(clock.offsetDays)} day${Math.abs(clock.offsetDays) === 1 ? '' : 's'} ${clock.offsetDays > 0 ? 'later' : 'earlier'} — likely a wrong camera clock`
+            : 'Capture times do not match the inspection date',
+          iconName: 'x', iconColor: 'var(--sys-orange)',
+          chevron: true,
+          onclick: () => clockSheet(clock),
+        }));
+      }
+      if (clock.noSource.length) {
+        rows.push(ui.row({
+          title: `${clock.noSource.length} photo${clock.noSource.length === 1 ? '' : 's'} with no capture time`,
+          sub: 'Stamped with the import time — check before reporting',
+          iconName: 'x', iconColor: 'var(--sys-gray)',
+          chevron: true,
+          onclick: () => clockSheet(clock),
+        }));
+      }
+      body.appendChild(ui.group('Check', rows));
+    }
 
     body.appendChild(ui.group('Progress', [
       ui.row({ title: 'Photos', value: String(st.photos), iconName: 'photos', iconColor: 'var(--sys-teal)' }),
