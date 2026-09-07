@@ -2,7 +2,13 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [claude/fast-report-pwa-inspections-8pq7it]
+    # Deploys from whichever of these you push to, so nothing needs changing
+    # after the feature branch is merged into main.
+    branches:
+      - main
+      - master
+      - claude/fast-report-pwa-inspections-8pq7it
+  # Lets you also deploy on demand from the Actions tab.
   workflow_dispatch:
 
 permissions:

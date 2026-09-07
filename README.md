@@ -88,7 +88,10 @@ https://<user>.github.io/<repo>/site/     Site app
 https://<user>.github.io/<repo>/admin/    Office app
 ```
 
-Enable it once under **Settings → Pages → Source: GitHub Actions**.
+One-time setup: in the repository on GitHub, go to **Settings → Pages** and set
+**Source** to **GitHub Actions**. Nothing else. The workflow already deploys from
+`main`, `master` or the feature branch, whichever you push to, and can also be run
+by hand from the **Actions** tab.
 
 The workflow fails the build if the Site app still contains any assistant code, so
 the capture app can never start shipping network calls by accident.
