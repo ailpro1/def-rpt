@@ -24,6 +24,88 @@ export async function decode(source) {
   });
 }
 
+/* ------------------------- capture time ------------------------- */
+
+/**
+ * When the photo was actually taken. EXIF DateTimeOriginal is the truth when it
+ * is there; a file's lastModified is next best (iOS sets it from the capture);
+ * import time is the last resort.
+ */
+export async function readTakenAt(file) {
+  let ts = null;
+  try { ts = await exifDate(file); } catch { /* unreadable EXIF is not an error */ }
+  if (ts) return { takenAt: ts, takenSource: 'exif' };
+  const lm = file && file.lastModified;
+  // Ignore obviously wrong clocks (pre-2000, or in the future).
+  if (lm && lm > 946684800000 && lm <= Date.now() + 864e5) return { takenAt: lm, takenSource: 'file' };
+  return { takenAt: Date.now(), takenSource: 'now' };
+}
+
+async function exifDate(file) {
+  if (!file || !file.slice) return null;
+  const v = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
+  if (v.byteLength < 4 || v.getUint16(0) !== 0xffd8) return null;   // not a JPEG
+
+  let off = 2;
+  while (off + 4 <= v.byteLength) {
+    if (v.getUint8(off) !== 0xff) break;
+    const marker = v.getUint8(off + 1);
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9)) { off += 2; continue; }
+    if (marker === 0xda) break;                                     // start of scan
+    const size = v.getUint16(off + 2);
+    if (size < 2) break;
+    if (marker === 0xe1 && off + 10 <= v.byteLength
+        && v.getUint32(off + 4) === 0x45786966 && v.getUint16(off + 8) === 0) {  // "Exif\0\0"
+      const found = tiffDate(v, off + 10);
+      if (found) return found;
+    }
+    off += 2 + size;
+  }
+  return null;
+}
+
+function tiffDate(v, base) {
+  if (base + 8 > v.byteLength) return null;
+  const le = v.getUint16(base) === 0x4949;
+  if (v.getUint16(base + 2, le) !== 0x2a) return null;
+
+  const ifd = (at) => {
+    const map = new Map();
+    if (at + 2 > v.byteLength) return map;
+    const n = v.getUint16(at, le);
+    for (let i = 0; i < n; i++) {
+      const e = at + 2 + i * 12;
+      if (e + 12 > v.byteLength) break;
+      map.set(v.getUint16(e, le), { type: v.getUint16(e + 2, le), count: v.getUint32(e + 4, le), at: e + 8 });
+    }
+    return map;
+  };
+  const ascii = (ent) => {
+    if (!ent || ent.type !== 2 || ent.count < 19) return null;
+    const p = ent.count > 4 ? base + v.getUint32(ent.at, le) : ent.at;
+    let out = '';
+    for (let k = 0; k < 19; k++) {
+      if (p + k >= v.byteLength) return null;
+      out += String.fromCharCode(v.getUint8(p + k));
+    }
+    return out;
+  };
+
+  const ifd0 = ifd(base + v.getUint32(base + 4, le));
+  let text = null;
+  const ptr = ifd0.get(0x8769);                        // ExifIFD
+  if (ptr) {
+    const sub = ifd(base + v.getUint32(ptr.at, le));
+    text = ascii(sub.get(0x9003)) || ascii(sub.get(0x9004));   // DateTimeOriginal, DateTimeDigitized
+  }
+  if (!text) text = ascii(ifd0.get(0x0132));           // DateTime
+
+  const m = /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(text || '');
+  if (!m) return null;
+  const ts = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+  return Number.isNaN(ts) ? null : ts;
+}
+
 export function toBlob(canvas, type = 'image/jpeg', quality = 0.82) {
   if (canvas.convertToBlob) return canvas.convertToBlob({ type, quality });
   return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
@@ -37,6 +119,7 @@ export function fit(w, h, max) {
 
 /** Downscale a captured/uploaded file to a report-sized JPEG + a grid thumb. */
 export async function ingest(file, { maxPx = 1600, quality = 0.82, thumbPx = 320 } = {}) {
+  const when = await readTakenAt(file);
   const bmp = await decode(file);
   const sw = bmp.width, sh = bmp.height;
 
@@ -55,7 +138,13 @@ export async function ingest(file, { maxPx = 1600, quality = 0.82, thumbPx = 320
   const thumb = await toBlob(c2, 'image/jpeg', 0.7);
 
   if (bmp.close) bmp.close();
-  return { blob, thumb, meta: { w: big.w, h: big.h, srcW: sw, srcH: sh, size: blob.size, ts: Date.now() } };
+  return {
+    blob, thumb,
+    meta: {
+      w: big.w, h: big.h, srcW: sw, srcH: sh, size: blob.size, ts: Date.now(),
+      takenAt: when.takenAt, takenSource: when.takenSource,
+    },
+  };
 }
 
 /**
@@ -168,4 +257,45 @@ export function revokeUrl(id) {
 export function revokeAll() {
   urlCache.forEach((u) => URL.revokeObjectURL(u));
   urlCache.clear();
+}
+
+/* ------------------------- timestamp stamp ------------------------- */
+
+/** Camera-style stamp, drawn in image pixels so it scales with the photo. */
+export function drawStamp(ctx, text, w, h, position = 'br') {
+  if (!text) return;
+  const size = Math.max(11, Math.round(Math.min(w, h) * 0.032));
+  const pad = Math.round(size * 0.45);
+  ctx.save();
+  ctx.font = `600 ${size}px ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
+  ctx.textBaseline = 'alphabetic';
+  const tw = ctx.measureText(text).width;
+  const left = position.endsWith('l');
+  const top = position.startsWith('t');
+  const x = left ? pad * 2 : w - pad * 2 - tw;
+  const y = top ? pad * 2 + size : h - pad * 2;
+  ctx.fillStyle = 'rgba(0,0,0,.42)';
+  ctx.fillRect(x - pad, y - size, tw + pad * 2, size + pad * 1.4);
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = 'rgba(0,0,0,.7)';
+  ctx.shadowBlur = size * 0.25;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+/**
+ * A one-off copy with annotations and a timestamp burned in, for sharing a
+ * photo outside the app. Nothing stored changes — the report draws its own
+ * stamp, so burning it here would double up.
+ */
+export async function stampedCopy(blob, text, { position = 'br', ops = null, maxPx = 1600, quality = 0.85 } = {}) {
+  const bmp = await decode(blob);
+  const { w, h } = fit(bmp.width, bmp.height, maxPx);
+  const c = canvasOf(w, h);
+  const ctx = c.getContext('2d');
+  ctx.drawImage(bmp, 0, 0, w, h);
+  if (ops && ops.length) drawOps(ctx, ops, w, h);
+  drawStamp(ctx, text, w, h, position);
+  if (bmp.close) bmp.close();
+  return toBlob(c, 'image/jpeg', quality);
 }

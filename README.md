@@ -30,6 +30,10 @@ caption you want is usually the first chip.
   report-sized JPEG plus a grid thumbnail, with EXIF orientation applied.
 - **Captions** — quick-pick chips, grouped library, optional second line, batch apply,
   move between sections, reorder.
+- **Photo timestamps** — the capture time is read from the photo's own EXIF
+  (`DateTimeOriginal`), falling back to the file's date and then to import time, and
+  printed camera-style on each report photo. Format, position and on/off are in
+  Settings; any photo's time can be corrected by hand if the camera clock was wrong.
 - **Annotation** — circle, arrow, box, freehand, text, dot; six colours, three widths,
   undo/clear. Strokes are stored as normalised vectors, so a photo stays re-editable
   and re-renders at any size. A flattened JPEG is generated for the report and sharing.
@@ -86,7 +90,25 @@ Title:  NO. 4 KLEBANG SEROJA        Group:  CAR PORCH
 ```
 
 **Title** is the project, **Group** is the section. The address prints in the footer
-of every page (or Settings → Page footer, if you set your own).
+of every page (or Settings → Page footer, if you set your own). Each photo carries its
+capture time in the corner, `2026.08.15 17:23` by default.
+
+### Photo timestamps
+
+| Source | When it is used |
+|---|---|
+| EXIF `DateTimeOriginal` | Whenever the photo carries it — the true capture time |
+| EXIF `DateTime` | Fallback within the same photo |
+| File `lastModified` | No EXIF; iOS sets this from the capture |
+| Import time | Nothing else available — the photo sheet flags this as "check this" |
+
+Settings → Photo Timestamp sets the format (`2026.08.15 17:23`, `15/08/2026 17:23`,
+12-hour, or date only), the corner, and whether the stamp is burned into photos shared
+out of the app on their own. The report draws its own stamp rather than burning it into
+the stored image, so it stays switchable and the original photo is never altered.
+
+Each photo's time is shown in its sheet under **Captured** and can be corrected there.
+Times travel in backup files, so a report built on another device keeps them.
 
 Pages are laid out at true A4 and scaled down only for the screen, so print output
 is 1:1.

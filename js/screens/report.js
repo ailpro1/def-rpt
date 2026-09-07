@@ -3,7 +3,7 @@ import * as ui from '../ui.js';
 import { go } from '../app.js';
 import {
   getProject, listSections, listPhotos, getBlob, getSettings,
-  displayBlobId, isOkCaption, updateProject,
+  displayBlobId, isOkCaption, updateProject, photoTakenAt,
 } from '../store.js';
 import { blobUrl } from '../image.js';
 import { draftSummary, aiReady } from '../ai.js';
@@ -30,6 +30,7 @@ export default async function renderReport(projectId) {
     notes: settings.notesEnabled,
     perPage: settings.photosPerPage || 6,
     skipEmpty: true,
+    stamp: settings.stampEnabled !== false,
   };
 
   screen.appendChild(ui.navbar({
@@ -50,6 +51,7 @@ export default async function renderReport(projectId) {
         ui.switchRow('Summary table', opts.summaryTable, (v) => { opts.summaryTable = v; build(); }, 'Item counts per location'),
         ui.switchRow('Notes & limitations', opts.notes, (v) => { opts.notes = v; build(); }),
         ui.switchRow('Skip empty sections', opts.skipEmpty, (v) => { opts.skipEmpty = v; build(); }),
+        ui.switchRow('Photo timestamps', opts.stamp, (v) => { opts.stamp = v; build(); }, 'Capture time on each photo'),
       ]),
       ui.group('Layout', [
         ui.row({
@@ -113,11 +115,17 @@ export default async function renderReport(projectId) {
 
   async function photoCell(p) {
     const cell = ui.h('div', { class: 'rcell' });
+    const wrap = ui.h('div', { class: 'ph-wrap' });
     const img = ui.h('img', { class: 'ph' });
     const id = displayBlobId(p);
     const b = await getBlob(id);
     if (b) img.src = blobUrl(id + ':rpt', b);
-    cell.appendChild(img);
+    wrap.appendChild(img);
+    if (opts.stamp) {
+      const text = ui.formatStamp(photoTakenAt(p), settings.stampFormat);
+      if (text) wrap.appendChild(ui.h('div', { class: 'ph-stamp ' + (settings.stampPosition || 'br'), text }));
+    }
+    cell.appendChild(wrap);
     const cap = ui.h('div', { class: 'cp', text: p.caption || '' });
     if (p.caption2) cap.appendChild(ui.h('div', { class: 'sub', text: p.caption2 }));
     cell.appendChild(cap);

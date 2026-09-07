@@ -242,6 +242,37 @@ export const fmtDate = (v) => {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
+export const STAMP_FORMATS = [
+  ['ymd24', '2026.08.15 17:23'],
+  ['dmy24', '15/08/2026 17:23'],
+  ['dmy12', '15/08/2026 5:23 PM'],
+  ['date', '15/08/2026'],
+];
+
+export function formatStamp(ts, format = 'ymd24') {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  const Y = d.getFullYear(), M = p(d.getMonth() + 1), D = p(d.getDate());
+  const hh = p(d.getHours()), mm = p(d.getMinutes());
+  if (format === 'dmy24') return `${D}/${M}/${Y} ${hh}:${mm}`;
+  if (format === 'dmy12') {
+    const h12 = d.getHours() % 12 || 12;
+    return `${D}/${M}/${Y} ${h12}:${mm} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
+  }
+  if (format === 'date') return `${D}/${M}/${Y}`;
+  return `${Y}.${M}.${D} ${hh}:${mm}`;
+}
+
+/** Value for an <input type="datetime-local">, in local time. */
+export function toLocalInput(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export const fmtBytes = (n) => {
   if (!n) return '0 KB';
   const u = ['B', 'KB', 'MB', 'GB'];

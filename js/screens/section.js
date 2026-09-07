@@ -3,9 +3,10 @@ import { go, back } from '../app.js';
 import {
   getProject, listSections, listPhotos, addPhoto, updatePhoto, deletePhoto,
   reorderPhotos, movePhotos, getBlob, getSettings, noteCaptionUse, displayBlobId, updateSection,
+  photoTakenAt,
 } from '../store.js';
 import * as db from '../db.js';
-import { ingest, blobUrl } from '../image.js';
+import { ingest, blobUrl, stampedCopy } from '../image.js';
 import { rankCaptions } from '../captions.js';
 import { openEditor } from './annotate.js';
 import { suggestCaption, suggestCaptionsBatch, aiReady } from '../ai.js';
@@ -212,8 +213,17 @@ export default async function renderSection(sectionId) {
       },
     }, ui.icon('sparkle', 20), ui.h('span', { text: 'Suggest caption' }));
 
+    const stampRow = ui.row({
+      title: 'Captured',
+      value: ui.formatStamp(photoTakenAt(fresh), settings.stampFormat) || 'Unknown',
+      sub: { exif: 'From the photo (EXIF)', file: 'From the photo file', now: 'Import time — check this' }[fresh.takenSource] || '',
+      chevron: true,
+      onclick: () => editTakenAt(fresh, stampRow),
+    });
+
     const body = ui.h('div', {},
       img,
+      ui.h('div', { class: 'list', style: { margin: '12px 12px 0' } }, stampRow),
       ui.h('div', { class: 'group-title', style: { paddingTop: '12px' }, text: 'Caption' }), ta,
       ta2,
       ui.h('div', { class: 'btn-stack' },
@@ -252,6 +262,38 @@ export default async function renderSection(sectionId) {
         if (!document.body.contains(sh.el)) { obs.disconnect(); resolve(result); }
       });
       obs.observe(document.getElementById('sheet-host'), { childList: true });
+    });
+  }
+
+  /* ---------------- capture time ---------------- */
+  function editTakenAt(photo, rowEl) {
+    const field = ui.h('input', { type: 'datetime-local', style: { width: '100%' } });
+    field.value = ui.toLocalInput(photoTakenAt(photo));
+    const body = ui.h('div', {},
+      ui.h('div', { class: 'hint', text: 'Read from the photo itself where possible. Correct it here if the camera clock was wrong.' }),
+      ui.group('', [ui.h('div', { class: 'row stack' }, ui.h('label', { text: 'Date and time' }), field)]),
+      ui.h('div', { class: 'btn-stack' },
+        ui.h('button', {
+          class: 'btn gray wide', text: 'Use this device\u2019s time now',
+          onclick: () => { field.value = ui.toLocalInput(Date.now()); },
+        })));
+    ui.sheet({
+      title: 'Capture Time', body, rightLabel: 'Save',
+      onRight: async () => {
+        const ts = field.value ? new Date(field.value).getTime() : null;
+        if (!ts || Number.isNaN(ts)) { ui.toast('Enter a valid date and time'); return false; }
+        const next = await updatePhoto(photo.id, { takenAt: ts, takenSource: 'manual' });
+        photo.takenAt = ts;
+        photo.takenSource = 'manual';
+        if (rowEl) {
+          rowEl.querySelector('.r-val').textContent = ui.formatStamp(ts, settings.stampFormat);
+          const sub = rowEl.querySelector('.r-sub');
+          if (sub) sub.textContent = 'Set by hand';
+        }
+        void next;
+        ui.toast('Capture time saved');
+        paint();
+      },
     });
   }
 
@@ -377,10 +419,17 @@ export default async function renderSection(sectionId) {
 
   async function sharePhotos() {
     if (!navigator.share) { ui.toast('Sharing is not supported in this browser'); return; }
+    const burn = settings.stampEnabled !== false && settings.stampInShare !== false;
     const files = [];
     for (const p of photos.slice(0, 12)) {
-      const b = await getBlob(displayBlobId(p));
-      if (b) files.push(new File([b], `${section.title}-${(p.caption || 'photo').replace(/[^\w]+/g, '-').slice(0, 30)}.jpg`, { type: 'image/jpeg' }));
+      let b = await getBlob(displayBlobId(p));
+      if (!b) continue;
+      if (burn) {
+        // The report draws its own stamp, so only shared copies get one burned in.
+        const text = ui.formatStamp(photoTakenAt(p), settings.stampFormat);
+        if (text) b = await stampedCopy(b, text, { position: settings.stampPosition || 'br' });
+      }
+      files.push(new File([b], `${section.title}-${(p.caption || 'photo').replace(/[^\w]+/g, '-').slice(0, 30)}.jpg`, { type: 'image/jpeg' }));
     }
     if (!files.length) { ui.toast('No photos to share'); return; }
     try { await navigator.share({ files, title: section.title }); }
@@ -404,7 +453,10 @@ export default async function renderSection(sectionId) {
       getBlob(p.thumbId || displayBlobId(p)).then((b) => { if (b) img.src = blobUrl((p.thumbId || p.blobId) + ':t', b); });
       cell.appendChild(ui.h('div', { class: 'num', text: String(i + 1) }));
       if (p.ops && p.ops.length) cell.appendChild(ui.h('div', { class: 'badge' }, ui.icon('pencil', 12)));
-      cell.appendChild(ui.h('div', { class: 'cap', text: p.caption ? p.caption.replace(/\n/g, ' · ') : 'Tap to caption' }));
+      const stamp = ui.formatStamp(photoTakenAt(p), 'dmy24');
+      cell.appendChild(ui.h('div', { class: 'cap' },
+        ui.h('div', { text: p.caption ? p.caption.replace(/\n/g, ' · ') : 'Tap to caption' }),
+        stamp ? ui.h('div', { class: 'cap-time', text: stamp.split(' ')[1] }) : null));
       cell.addEventListener('click', () => {
         if (selectMode) {
           if (selected.has(p.id)) selected.delete(p.id); else selected.add(p.id);

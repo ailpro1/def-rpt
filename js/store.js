@@ -28,6 +28,10 @@ export const DEFAULT_SETTINGS = {
   notesBody: '',
   footerText: '',
   photosPerPage: 6,
+  stampEnabled: true,
+  stampFormat: 'ymd24',    // 2026.08.15 17:23 — matches the sample reports
+  stampPosition: 'br',
+  stampInShare: true,
   imageMaxPx: 1600,
   imageQuality: 0.82,
   aiImagePx: 768,          // one Gemini image tile — cheapest useful size
@@ -197,6 +201,8 @@ export async function addPhoto(projectId, sectionId, blob, thumb, meta = {}) {
   const photo = {
     id: db.uid('pho'),
     projectId, sectionId, blobId, thumbId,
+    takenAt: meta.takenAt || Date.now(),
+    takenSource: meta.takenSource || 'now',
     flatBlobId: null,
     ops: [],
     caption: '',
@@ -269,6 +275,10 @@ export const deleteBlob = (id) => (id ? db.del(db.STORES.blobs, id) : Promise.re
 
 /* Display blob: flattened (annotated) version if present, else original. */
 export const displayBlobId = (photo) => photo.flatBlobId || photo.blobId;
+
+/** When the photo was taken. Falls back for records made before stamps existed. */
+export const photoTakenAt = (photo) =>
+  (photo && (photo.takenAt || (photo.meta && (photo.meta.takenAt || photo.meta.ts)) || photo.createdAt)) || null;
 
 async function touch(projectId) {
   const p = await getProject(projectId);

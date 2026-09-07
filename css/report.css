@@ -32,7 +32,18 @@
   grid-template-rows:repeat(var(--rows,3),1fr);
   column-gap:5mm;row-gap:4mm;flex:1;min-height:0}
 .rcell{display:flex;flex-direction:column;min-height:0;break-inside:avoid}
-.rcell .ph{flex:1;min-height:0;width:100%;object-fit:cover;display:block;background:#eee}
+.rcell .ph-wrap{position:relative;flex:1;min-height:0;display:flex;overflow:hidden}
+.rcell .ph{width:100%;height:100%;object-fit:cover;display:block;background:#eee}
+
+/* camera-style capture time */
+.ph-stamp{position:absolute;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  font-size:5.6pt;line-height:1;color:#fff;background:rgba(0,0,0,.45);
+  padding:.7mm 1mm;letter-spacing:.02em;white-space:nowrap;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact}
+.ph-stamp.br{right:1.2mm;bottom:1.2mm}
+.ph-stamp.bl{left:1.2mm;bottom:1.2mm}
+.ph-stamp.tr{right:1.2mm;top:1.2mm}
+.ph-stamp.tl{left:1.2mm;top:1.2mm}
 .rcell .cp{flex:none;margin-top:1.4mm;font-size:8.2pt;line-height:1.28;
   text-transform:uppercase;white-space:pre-line}
 .rcell .cp .sub{text-transform:none}

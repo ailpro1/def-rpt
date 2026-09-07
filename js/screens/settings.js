@@ -232,6 +232,36 @@ export default async function renderSettings() {
       ui.row({ title: 'Caption & section library', sub: 'Quick-pick captions used on site', chevron: true, onclick: () => { location.hash = '#/library'; } }),
     ]));
 
+    /* photo timestamp */
+    body.appendChild(ui.group('Photo Timestamp', [
+      ui.switchRow('Show on report photos', s.stampEnabled !== false, (v) => set({ stampEnabled: v }).then(paint),
+        'Capture time is read from the photo itself'),
+      ui.row({
+        title: 'Format',
+        right: ui.h('select', {
+          onchange: (e) => set({ stampFormat: e.target.value }).then(paint),
+          style: { border: 0, background: 'none', fontSize: '15px', color: 'var(--label-2)' },
+        }, ...ui.STAMP_FORMATS.map(([v, label]) => {
+          const o = ui.h('option', { value: v, text: label });
+          if (v === s.stampFormat) o.selected = true;
+          return o;
+        })),
+      }),
+      ui.row({
+        title: 'Position',
+        right: ui.h('select', {
+          onchange: (e) => set({ stampPosition: e.target.value }),
+          style: { border: 0, background: 'none', fontSize: '17px', color: 'var(--label-2)' },
+        }, ...[['br', 'Bottom right'], ['bl', 'Bottom left'], ['tr', 'Top right'], ['tl', 'Top left']].map(([v, label]) => {
+          const o = ui.h('option', { value: v, text: label });
+          if (v === (s.stampPosition || 'br')) o.selected = true;
+          return o;
+        })),
+      }),
+      ui.switchRow('Burn into shared photos', s.stampInShare !== false, (v) => set({ stampInShare: v }),
+        'For photos sent out of the app on their own'),
+    ]));
+
     /* AI */
     body.appendChild(ui.group('Assistant', [
       ui.row({
