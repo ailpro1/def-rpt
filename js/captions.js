@@ -94,3 +94,56 @@ function affinity(sec, c) {
   }
   return 0;
 }
+
+/**
+ * Type-ahead search over the caption library. Built for thumb-typing on site:
+ * a word prefix, an abbreviation ("ug" finds UNFILLED GROUT) or loose letters
+ * in order all match, and how often you use a caption breaks the ties.
+ */
+export function searchCaptions(lib, usage, sectionTitle, query, limit = 6) {
+  const q = String(query || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!q) return [];
+  const sec = (sectionTitle || '').toUpperCase();
+  const tokens = q.split(' ').filter(Boolean);
+  const out = [];
+
+  flatCaptions(lib).forEach((c) => {
+    const text = c.text.toUpperCase();
+    const flat = text.replace(/\n/g, ' ');
+    const words = flat.split(/[^A-Z0-9]+/).filter(Boolean);
+    const initials = words.map((w) => w[0]).join('');
+
+    let score = 0;
+    if (flat.startsWith(q)) score = 100;
+    else if (words.some((w) => w.startsWith(q))) score = 70;
+    else if (initials.startsWith(q.replace(/ /g, ''))) score = 62;
+    else if (tokens.length > 1 && tokens.every((t) => words.some((w) => w.startsWith(t)))) score = 55;
+    else if (flat.includes(q)) score = 40;
+    else if (subsequence(q.replace(/ /g, ''), flat.replace(/ /g, ''))) score = 14;
+    else return;
+
+    const tier = score;
+    const u = usage[c.text] || { n: 0, last: 0, sections: {} };
+    score += Math.min(12, u.n * 1.5) + (u.sections[sec] ? 6 : 0) + affinity(sec, c);
+    if (u.last) score += Math.max(0, 4 - (Date.now() - u.last) / 36e5);
+    out.push({ text: c.text, group: c.group, score, tier });
+  });
+
+  // Loose letter matches are a last resort: two letters find something in
+  // almost any caption, so drop them the moment a real match exists.
+  const best = out.reduce((m, c) => Math.max(m, c.tier), 0);
+  const kept = best >= 40 ? out.filter((c) => c.tier >= 40) : out;
+
+  kept.sort((a, b) => b.score - a.score || a.text.length - b.text.length);
+  return kept.slice(0, limit);
+}
+
+/** Do the letters of `q` appear in `text`, in order? */
+function subsequence(q, text) {
+  let i = 0;
+  for (const ch of text) {
+    if (ch === q[i]) i++;
+    if (i === q.length) return true;
+  }
+  return q.length > 0 && i === q.length;
+}

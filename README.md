@@ -22,14 +22,22 @@ Captions come from an editable library. The suggestion row is ranked offline by 
 often you use each caption, how recently, and which location you are in — so the
 caption you want is usually the first chip.
 
+Typing in the caption box searches the same library and lists matches under the
+field. A word prefix works (`grout`), so does an abbreviation (`ug` &rarr; UNFILLED
+GROUT, `rdk` &rarr; RUSTED DOOR KNOB), and loose letters in order are the last
+resort — dropped as soon as a real match exists, so two letters do not fill the list
+with noise. Ties break on how often you use each caption. Picking one keeps the
+keyboard up, and only the line being typed is replaced, so a second line can be
+searched on its own.
+
 ## Features
 
 - **Projects** — one per property. Sections (CAR PORCH, KITCHEN, BATH 3 …) added
   individually or from a template.
 - **Photos** — live camera capture or device library. Downscaled on-device to a
   report-sized JPEG plus a grid thumbnail, with EXIF orientation applied.
-- **Captions** — quick-pick chips, grouped library, optional second line, batch apply,
-  move between sections, reorder.
+- **Captions** — type-ahead search, quick-pick chips, grouped library, optional second
+  line, batch apply, move between sections, reorder.
 - **Photo timestamps** — the capture time is read from the photo's own EXIF
   (`DateTimeOriginal`), falling back to the file's date and then to import time, and
   printed camera-style on each report photo. Format, position and on/off are in

@@ -7,7 +7,7 @@ import {
 } from '../store.js';
 import * as db from '../db.js';
 import { ingest, blobUrl, stampedCopy } from '../image.js';
-import { rankCaptions } from '../captions.js';
+import { rankCaptions, searchCaptions } from '../captions.js';
 import { openEditor } from './annotate.js';
 import { suggestCaption, suggestCaptionsBatch, aiReady, aiEnabled } from '../assist.js';
 
@@ -146,8 +146,16 @@ export default async function renderSection(sectionId) {
   function pickCaption(title, current = '') {
     return new Promise((resolve) => {
       let value = current;
-      const ta = ui.h('textarea', { class: 'cap-input', placeholder: 'Type a caption, or tap one below', oninput: (e) => { value = e.target.value; } });
+      const ta = ui.h('textarea', {
+        class: 'cap-input', placeholder: 'Type to search captions, or write your own',
+        autocapitalize: 'characters', spellcheck: 'false',
+        oninput: (e) => { value = e.target.value; },
+      });
       ta.value = current;
+      ui.autocomplete(ta, {
+        source: (q) => searchCaptions(settings.captionLib, settings.usage, section.title, q),
+        onPick: (item) => { value = item.text; ta.value = item.text; },
+      });
       const ranked = rankCaptions(settings.captionLib, settings.usage, section.title, 12);
       const quick = ui.h('div', { class: 'chips' },
         ...ranked.map((c) => ui.h('button', {
@@ -181,8 +189,22 @@ export default async function renderSection(sectionId) {
     let saved = false;
 
     const img = ui.h('img', { class: 'cap-preview', src: blobUrl(displayBlobId(fresh) + ':cap', blob) });
-    const ta = ui.h('textarea', { class: 'cap-input', placeholder: 'Caption (prints under the photo)', oninput: (e) => { caption = e.target.value; } });
+    const ta = ui.h('textarea', {
+      class: 'cap-input', placeholder: 'Type to search captions, or write your own',
+      autocapitalize: 'characters', spellcheck: 'false',
+      oninput: (e) => { caption = e.target.value; },
+    });
     ta.value = caption;
+    // Type-ahead over the library: two or three letters is usually enough.
+    ui.autocomplete(ta, {
+      source: (q) => searchCaptions(settings.captionLib, settings.usage, section.title, q),
+      onPick: (item) => {
+        const lines = ta.value.split('\n');
+        lines[lines.length - 1] = item.text;      // replace only what was being typed
+        caption = lines.join('\n');
+        ta.value = caption;
+      },
+    });
     const ta2 = ui.h('textarea', { class: 'cap-input', style: { minHeight: '48px', fontSize: '14px' }, placeholder: 'Second line (optional) — e.g. address or note', oninput: (e) => { caption2 = e.target.value; } });
     ta2.value = caption2;
 

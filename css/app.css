@@ -210,7 +210,9 @@ svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.9;stroke
 .swatch[aria-pressed=true]{border-color:#fff;transform:scale(1.14)}
 
 /* ---------- caption editor sheet ---------- */
-.cap-preview{width:100%;aspect-ratio:4/3;object-fit:contain;background:#000;display:block}
+/* Capped so the caption field and its suggestions stay reachable with the
+   keyboard up, instead of sitting below a full-height photo. */
+.cap-preview{width:100%;aspect-ratio:4/3;max-height:34vh;object-fit:contain;background:#000;display:block}
 .cap-input{width:100%;border:0;background:var(--bg-group);padding:12px 14px;font-size:16px;outline:none;
   min-height:76px;resize:vertical;font-family:inherit;line-height:1.4}
 
@@ -245,3 +247,13 @@ svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.9;stroke
 /* ---------- credit ---------- */
 .credit{text-align:center;padding:6px 16px 26px;color:var(--label-3);font-size:12px;letter-spacing:.01em}
 .credit small{display:block;margin-top:2px;font-size:11px;color:var(--label-3)}
+
+/* ---------- caption type-ahead ---------- */
+.ac{margin:6px 12px 0;background:var(--bg-group);border-radius:12px;overflow:hidden auto;
+  max-height:42vh;box-shadow:0 6px 20px #00000014}
+.ac-row{display:block;width:100%;text-align:left;border:0;background:none;cursor:pointer;
+  padding:11px 14px;border-bottom:.5px solid var(--sep)}
+.ac-row:last-child{border-bottom:0}
+.ac-row:active{background:var(--fill-2)}
+.ac-t{font-size:16px;letter-spacing:-.01em}
+.ac-s{font-size:12px;color:var(--label-2);margin-top:1px;text-transform:uppercase;letter-spacing:.03em}

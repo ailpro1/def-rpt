@@ -119,6 +119,73 @@ export const group = (title, ...rows) =>
   h('div', { class: 'group' }, title ? h('div', { class: 'group-title', text: title }) : null,
     h('div', { class: 'list' }, ...rows.flat().filter(Boolean)));
 
+/* ---------------- type-ahead ---------------- */
+/**
+ * Suggestion list under a text field. Sits in the flow rather than floating, so
+ * it behaves inside a scrolling sheet with the keyboard up.
+ *
+ * `source(query)` returns [{ text, group }]. Picking one keeps the field
+ * focused — the keyboard staying up is the difference between fast and not.
+ */
+export function autocomplete(field, { source, onPick, minChars = 1 }) {
+  const box = h('div', { class: 'ac', hidden: true });
+
+  const close = () => { box.hidden = true; clear(box); };
+
+  // The field is usually built before it is added to a sheet, and
+  // insertAdjacentElement is a no-op on a node with no parent — so attach the
+  // list the first time it is needed instead.
+  const attach = () => {
+    if (!box.parentNode && field.parentNode) field.insertAdjacentElement('afterend', box);
+    return !!box.parentNode;
+  };
+
+  function render() {
+    const query = field.value || '';
+    // The last line is what is being typed; earlier lines are already settled.
+    const active = query.split('\n').pop();
+    if (active.trim().length < minChars) return close();
+    const items = source(active) || [];
+    // Nothing to offer once the field already holds the whole caption.
+    if (!items.length || (items.length === 1 && items[0].text === query)) return close();
+    if (!attach()) return;
+
+    clear(box);
+    items.forEach((item) => {
+      const row = h('button', { class: 'ac-row', type: 'button' },
+        h('div', { class: 'ac-t', text: item.text.replace(/\n/g, ' · ') }),
+        item.group ? h('div', { class: 'ac-s', text: item.group }) : null);
+      // pointerdown, not click: the default would blur the field and drop the
+      // keyboard before the tap registers.
+      row.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        haptic();
+        onPick(item);
+        close();
+        field.focus();
+        const end = field.value.length;
+        try { field.setSelectionRange(end, end); } catch { /* not all fields support it */ }
+      });
+      box.appendChild(row);
+    });
+    box.hidden = false;
+  }
+
+  field.addEventListener('input', render);
+  field.addEventListener('focus', () => {
+    render();
+    // Bring the field to the top of its scroller so the suggestions have room
+    // once the keyboard is up.
+    setTimeout(() => {
+      try { field.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch { /* older Safari */ }
+    }, 260);
+  });
+  field.addEventListener('blur', () => setTimeout(close, 150));
+  field.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+
+  return { render, close, destroy: () => { close(); box.remove(); } };
+}
+
 /* ---------------- toast ---------------- */
 let toastTimer = null;
 export function toast(msg, ms = 1900) {
