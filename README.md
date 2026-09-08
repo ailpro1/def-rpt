@@ -323,6 +323,21 @@ Android and on Safari on iOS 16.4+.
 Firefox on Android has no Web Share for files; backup export falls back to a plain
 download there.
 
+## Interaction notes
+
+The document itself never scrolls — every screen scrolls inside its own pane. That
+is what keeps a sheet fixed in place: without it, iOS rubber-bands the page behind
+the sheet, and shifts the whole page (fixed sheet included) when the keyboard opens.
+
+- Presenting any overlay takes a counted scroll lock, so a confirm stacked on a
+  sheet does not release it early.
+- The dimmed area swallows drags and wheels rather than chaining them to the list
+  behind it.
+- Sheets and alerts are sized against `window.visualViewport`, published as `--vvh`,
+  so the keyboard cannot push a sheet off-screen.
+- The lock never sets `overflow: hidden` on a scroll pane — that resets `scrollTop`,
+  which would jump a long photo grid back to the top every time a sheet closed.
+
 ## Notes
 
 - Photos never leave the device unless you share them, back up, or use the assistant.

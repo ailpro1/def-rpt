@@ -197,10 +197,36 @@ export function toast(msg, ms = 1900) {
 }
 
 /* ---------------- alert / confirm / prompt ---------------- */
+/* ---------------- scroll lock ---------------- */
+/* Overlays can stack (a confirm on top of a sheet), so the lock is counted. */
+let locks = 0;
+export function lockScroll() {
+  locks++;
+  document.documentElement.classList.add('modal-open');
+}
+export function unlockScroll() {
+  locks = Math.max(0, locks - 1);
+  if (!locks) document.documentElement.classList.remove('modal-open');
+}
+
 function present(node, { onDismiss } = {}) {
   const host = document.getElementById('sheet-host');
   const scrim = h('div', { class: 'scrim', onclick: () => close() });
-  const close = () => { scrim.remove(); node.remove(); onDismiss && onDismiss(); };
+  // A drag or wheel on the dimmed area must do nothing at all. Without this the
+  // browser chains the gesture to the scrollable list behind the sheet.
+  const swallow = (e) => e.preventDefault();
+  scrim.addEventListener('touchmove', swallow, { passive: false });
+  scrim.addEventListener('wheel', swallow, { passive: false });
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    scrim.remove();
+    node.remove();
+    unlockScroll();
+    onDismiss && onDismiss();
+  };
+  lockScroll();
   host.appendChild(scrim);
   host.appendChild(node);
   return close;

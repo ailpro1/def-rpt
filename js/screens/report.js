@@ -299,10 +299,15 @@ export default async function renderReport(projectId) {
 
   /* Fit the A4 pages to the phone screen without touching print output. */
   function scalePages() {
-    const avail = wrap.clientWidth - 16;
-    const scale = Math.min(1, avail / (210 * MM));
+    // build() runs before the router attaches this screen, so clientWidth can
+    // still be 0 here — which used to produce a negative scale and pages with
+    // no height. Fall back to the document width, and never go non-positive.
+    const avail = (wrap.clientWidth || document.documentElement.clientWidth) - 16;
+    const scale = Math.min(1, Math.max(0.2, avail / (210 * MM)));
     wrap.style.setProperty('--scale', String(scale));
   }
+  // Recompute once the node is actually in the page, and on rotation.
+  if ('ResizeObserver' in window) new ResizeObserver(scalePages).observe(wrap);
   window.addEventListener('resize', scalePages);
 
   await build();

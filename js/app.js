@@ -53,7 +53,8 @@ async function route() {
   app.appendChild(node);
 
   tabbar.hidden = !!match.r.hideTabs;
-  app.style.paddingBottom = match.r.hideTabs ? '0' : '';
+  // Screens without the tab bar should not reserve room for it.
+  app.classList.toggle('no-tabs', !!match.r.hideTabs);
   [...tabbar.querySelectorAll('.tab')].forEach((t) => {
     t.setAttribute('aria-selected', String(t.dataset.route === match.r.tab));
   });
@@ -76,6 +77,25 @@ tabbar.addEventListener('click', (e) => {
 });
 
 window.addEventListener('hashchange', route);
+
+/* ---------- visual viewport ---------- */
+/* On iOS the on-screen keyboard shrinks the visual viewport without changing
+   100vh, which is what makes a bottom sheet slide out from under the keyboard.
+   Publishing the real height as --vvh keeps sheets and alerts where they belong. */
+function trackViewport() {
+  const vv = window.visualViewport;
+  const apply = () => {
+    const h = vv ? vv.height : window.innerHeight;
+    document.documentElement.style.setProperty('--vvh', `${Math.round(h)}px`);
+  };
+  apply();
+  if (vv) {
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
+  }
+  window.addEventListener('orientationchange', () => setTimeout(apply, 250));
+  window.addEventListener('resize', apply);
+}
 
 /* ---------- offline indicator ---------- */
 function syncOnline() {
@@ -154,6 +174,7 @@ async function setupUpdates() {
 /* ---------- boot ---------- */
 (async function boot() {
   await getSettings();
+  trackViewport();
   if (!location.hash) go('#/projects', true);
   syncOnline();
   await route();

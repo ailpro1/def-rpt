@@ -19,19 +19,27 @@
   }
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{height:100%}
+/* The document itself never scrolls — every screen scrolls inside its own
+   .scroll pane. That stops the rubber-banding drag behind sheets, and stops iOS
+   shifting the page (and any fixed sheet with it) when the keyboard opens. */
+html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 body{
   margin:0;background:var(--bg);color:var(--label);font-family:var(--font);
-  font-size:17px;line-height:1.35;overscroll-behavior-y:none;
+  font-size:17px;line-height:1.35;position:relative;
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
 }
 button,input,textarea,select{font:inherit;color:inherit}
 svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 
 /* ---------- layout ---------- */
-.app{min-height:100%;padding-bottom:calc(58px + var(--safe-b))}
-.screen{display:flex;flex-direction:column;min-height:100vh}
-.scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:24px}
+.app{height:100%;overflow:hidden}
+.screen{display:flex;flex-direction:column;height:100%}
+.scroll{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;padding-bottom:calc(24px + 58px + var(--safe-b))}
+/* Nothing behind an open sheet may move. Note: no overflow:hidden here — that
+   resets scrollTop, so closing a sheet would jump the list back to the top. */
+html.modal-open .scroll{touch-action:none}
+.app.no-tabs .scroll{padding-bottom:24px}
 
 /* ---------- nav bar ---------- */
 .navbar{
@@ -164,20 +172,24 @@ svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.9;stroke
 @keyframes pop{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
 
 /* ---------- sheets / dialogs ---------- */
-.scrim{position:fixed;inset:0;background:#00000059;z-index:200;animation:fade .2s}
+.scrim{position:fixed;inset:0;background:#00000059;z-index:200;animation:fade .2s;
+  touch-action:none;overscroll-behavior:none}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:210;background:var(--bg);
-  border-radius:14px 14px 0 0;max-height:90vh;display:flex;flex-direction:column;
+  border-radius:14px 14px 0 0;display:flex;flex-direction:column;
+  max-height:calc(var(--vvh, 100vh) - 40px);   /* leaves a tap target above to dismiss */
   padding-bottom:var(--safe-b);animation:up .28s cubic-bezier(.32,.72,0,1)}
 @keyframes up{from{transform:translateY(100%)}to{transform:translateY(0)}}
 .sheet-grab{width:36px;height:5px;border-radius:3px;background:var(--label-3);margin:8px auto 2px;flex:none}
 .sheet-head{display:flex;align-items:center;min-height:44px;padding:0 8px;border-bottom:.5px solid var(--sep);flex:none}
 .sheet-head .t{flex:1;text-align:center;font-weight:600;font-size:17px}
-.sheet-body{overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:16px}
-.alert{position:fixed;z-index:310;left:50%;top:50%;transform:translate(-50%,-50%);width:270px;
+.sheet-body{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;padding-bottom:16px}
+.alert{position:fixed;z-index:310;left:50%;top:calc(var(--vvh, 100vh) / 2);transform:translate(-50%,-50%);width:270px;
   background:var(--bg-elev);border-radius:14px;overflow:hidden;text-align:center;
   backdrop-filter:blur(20px);animation:pop2 .2s}
 @keyframes pop2{from{opacity:0;transform:translate(-50%,-50%) scale(1.1)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+.alert .a-body{max-height:60vh;overflow-y:auto;overscroll-behavior:contain}
 .alert .a-body{padding:19px 16px 15px}
 .alert h4{margin:0 0 4px;font-size:17px;font-weight:600}
 .alert p{margin:0;font-size:13px;color:var(--label-2)}
@@ -192,7 +204,8 @@ svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.9;stroke
 .alert .a-btns button.destructive{color:var(--sys-red)}
 
 /* ---------- annotate editor ---------- */
-.editor{position:fixed;inset:0;z-index:300;background:#000;display:flex;flex-direction:column}
+.editor{position:fixed;inset:0;z-index:300;background:#000;display:flex;flex-direction:column;
+  touch-action:none;overscroll-behavior:none}
 .editor .e-top{padding-top:var(--safe-t);display:flex;align-items:center;min-height:44px;color:#fff;
   background:#000;padding-left:8px;padding-right:8px;gap:8px}
 .editor .e-top .t{flex:1;text-align:center;font-size:15px;font-weight:600}

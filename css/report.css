@@ -1,5 +1,5 @@
 /* Insta Report — printable report layout (A4 portrait) */
-.report-wrap{background:#8a8a8e;padding:12px 0 32px;min-height:100vh}
+.report-wrap{background:#8a8a8e;padding:12px 0 32px;min-height:100%}
 @media (prefers-color-scheme: dark){.report-wrap{background:#3a3a3c}}
 
 /* Pages are always laid out at true A4; --scale only shrinks them to fit the

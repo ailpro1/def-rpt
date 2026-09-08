@@ -82,6 +82,7 @@ export function openEditor({ blob, ops = [], title = '', onSave }) {
 
     root.append(top, stage, tools);
     document.body.appendChild(root);
+    ui.lockScroll();
 
     let bmp = null;
     let cw = 0, ch = 0;
@@ -177,6 +178,7 @@ export function openEditor({ blob, ops = [], title = '', onSave }) {
       window.removeEventListener('resize', layout);
       if (bmp && bmp.close) bmp.close();
       root.remove();
+      ui.unlockScroll();
       resolve(saved);
     }
   });
