@@ -1,5 +1,5 @@
 // Insta Report service worker — precache the shell so the app opens offline.
-const VERSION = 'v1.10.0';
+const VERSION = 'v1.11.0';
 const CACHE = (self.APP_CACHE_PREFIX || 'instareport-admin-') + VERSION;
 
 const SHELL = [
@@ -11,6 +11,9 @@ const SHELL = [
   './js/app.js',
   './js/build.js',
   './js/pdf.js',
+  './js/zip.js',
+  './js/docx.js',
+  './js/report-docx.js',
   './js/report-pdf.js',
   './js/assist.js',
   './js/fallback.js',

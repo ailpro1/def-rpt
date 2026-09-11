@@ -22,6 +22,11 @@ Captions come from an editable library. The suggestion row is ranked offline by 
 often you use each caption, how recently, and which location you are in — so the
 caption you want is usually the first chip.
 
+A caption that is not in the library — one the assistant wrote, or one you typed —
+shows a **Save to library** button in the photo sheet. Pick a group and it becomes a
+chip and a type-ahead match from then on, so the vocabulary tightens over time
+instead of drifting.
+
 Typing in the caption box searches the same library and lists matches under the
 field. A word prefix works (`grout`), so does an abbreviation (`ug` &rarr; UNFILLED
 GROUT, `rdk` &rarr; RUSTED DOOR KNOB), and loose letters in order are the last
@@ -241,6 +246,22 @@ date keeping each photo's time of day — or to change the inspection date inste
 
 Pages are laid out at true A4 and scaled down only for the screen.
 
+### Export
+
+The ⬇ button offers **PDF**, **Word (.docx)** and **Print**.
+
+| | PDF | Word |
+|---|---|---|
+| Layout | Fixed, exactly what the preview shows | Word repaginates |
+| Editable | No | Yes |
+| Written by | `js/pdf.js` + `js/report-pdf.js` | `js/zip.js` + `js/docx.js` + `js/report-docx.js` |
+| Timestamps | Drawn as a layer over the photo | Burned into the photo, since a .docx cannot carry a separate layer |
+
+Both are written by the app, with no dependency and no server, so both work
+offline. Word gets one document section per report section, which is how each
+section keeps its own `Title: / Group:` header; the footer uses Word's own PAGE
+and NUMPAGES fields, so page numbers stay correct after editing.
+
 ### Save PDF
 
 **Save PDF** writes the file itself — the app contains a small PDF writer
@@ -279,6 +300,9 @@ js/backup.js            export / import / share
 js/ui.js                DOM helpers, sheets, alerts, rows
 js/screens/*.js         one module per screen
 js/pdf.js               minimal PDF writer (pages, text, rules, JPEG images)
+js/zip.js               stored-entry ZIP writer, for the .docx package
+js/docx.js              minimal Word writer (OOXML parts, headers, tables)
+js/report-docx.js       lays the report out as an editable Word document
 js/report-pdf.js        lays the report out as a PDF, from the data
 js/build.js             build profile — the only file that differs per app
 js/assist.js            the assistant's public surface; loads ai.js on demand

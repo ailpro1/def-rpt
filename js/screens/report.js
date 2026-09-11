@@ -9,6 +9,7 @@ import {
 import { blobUrl } from '../image.js';
 import { draftSummary, aiReady, aiEnabled } from '../assist.js';
 import { buildReportPdf, reportFilename, planTableFormat, captionPageCount } from '../report-pdf.js';
+import { buildReportDocx } from '../report-docx.js';
 import { saveFile } from '../backup.js';
 
 const MM = 96 / 25.4;
@@ -44,7 +45,7 @@ export default async function renderReport(projectId) {
     left: ui.backBtn(() => go('#/project/' + projectId), 'Project'),
     right: ui.h('span', { style: { display: 'flex' } },
       ui.navBtn('', optionsSheet, { icon: 'more' }),
-      ui.navBtn('', savePdf, { icon: 'down' })),
+      ui.navBtn('', exportSheet, { icon: 'down' })),
   }));
   screen.appendChild(scroll);
 
@@ -99,12 +100,13 @@ export default async function renderReport(projectId) {
         }),
       ]),
       ui.h('div', { class: 'btn-stack' },
-        ui.h('button', { class: 'btn wide', onclick: savePdf, text: 'Save PDF' }),
+        ui.h('button', { class: 'btn wide', onclick: () => exportReport('pdf'), text: 'Save PDF' }),
+        ui.h('button', { class: 'btn tinted wide', onclick: () => exportReport('docx'), text: 'Save Word (.docx)' }),
         aiEnabled
           ? ui.h('button', { class: 'btn tinted wide', onclick: aiSummary, text: 'Draft summary with AI' })
           : null,
         ui.h('button', { class: 'btn gray wide', onclick: () => window.print(), text: 'Print instead' })),
-      ui.h('div', { class: 'group-note', text: 'Save PDF writes the file itself, so it carries none of the browser\u2019s own page header or footer. Print goes through Safari or Chrome, which add the page address and date.' }));
+      ui.h('div', { class: 'group-note', text: 'PDF is written by the app, so it carries none of the browser\u2019s own page header or footer, and the layout is exactly what you see here. Word is editable, but Word decides where the pages break.' }));
     ui.sheet({ title: 'Report Options', body, leftLabel: 'Done' });
   }
 
@@ -125,8 +127,8 @@ export default async function renderReport(projectId) {
     } catch (err) { ui.toast(err.message || 'Could not draft summary'); }
   }
 
-  /* ---------------- PDF ---------------- */
-  async function savePdf() {
+  /* ---------------- export ---------------- */
+  async function reportData() {
     const sections = await listSections(projectId);
     const data = [];
     for (const sec of sections) {
@@ -134,20 +136,43 @@ export default async function renderReport(projectId) {
       if (opts.skipEmpty && !photos.length) continue;
       data.push({ section: sec, photos });
     }
+    return data;
+  }
+
+  async function exportReport(kind) {
+    const data = await reportData();
     if (!data.length) { ui.toast('Nothing to report yet — add photos first'); return; }
 
     const total = data.reduce((n, d) => n + d.photos.length, 0);
-    ui.toast(`Writing PDF (${total} photo${total === 1 ? '' : 's'})\u2026`, 120000);
+    const label = kind === 'docx' ? 'Word document' : 'PDF';
+    ui.toast(`Writing the ${label} (${total} photo${total === 1 ? '' : 's'})\u2026`, 120000);
     try {
-      const blob = await buildReportPdf({ project, settings, data, opts });
-      const name = reportFilename(project);
+      const blob = kind === 'docx'
+        ? await buildReportDocx({ project, settings, data, opts })
+        : await buildReportPdf({ project, settings, data, opts });
+      const name = reportFilename(project).replace(/\.pdf$/, kind === 'docx' ? '.docx' : '.pdf');
       const how = await saveFile(blob, name);
       if (how === 'cancelled') ui.toast('Cancelled');
       else ui.toast(`${name} \u2014 ${ui.fmtBytes(blob.size)}`, 3500);
     } catch (err) {
       console.error(err);
-      ui.alert('Could not write the PDF', err.message || String(err));
+      ui.alert(`Could not write the ${label}`, err.message || String(err));
     }
+  }
+
+  const savePdf = () => exportReport('pdf');
+
+  async function exportSheet() {
+    const choice = await ui.actionSheet('Export report', [
+      { label: 'PDF', value: 'pdf', icon: 'doc', color: 'var(--sys-red)', primary: true,
+        sub: 'Final, fixed layout — what you send to a client' },
+      { label: 'Word (.docx)', value: 'docx', icon: 'doc', color: 'var(--sys-blue)',
+        sub: 'Editable; Word re-flows the pages' },
+      { label: 'Print instead', value: 'print', icon: 'print', color: 'var(--sys-gray)',
+        sub: 'Goes through the browser, which adds its own header' },
+    ]);
+    if (choice === 'pdf' || choice === 'docx') exportReport(choice);
+    if (choice === 'print') window.print();
   }
 
   /* ---------------- page helpers ---------------- */

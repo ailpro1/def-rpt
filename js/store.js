@@ -63,6 +63,27 @@ export async function saveSettings(patch) {
   return _settings;
 }
 
+/** Is this exact caption already in the library? */
+export async function captionInLibrary(text) {
+  const s = await getSettings();
+  const needle = (text || '').trim().toUpperCase();
+  if (!needle) return true;
+  return s.captionLib.some((g) => g.items.some((i) => i.trim().toUpperCase() === needle));
+}
+
+/** Add a caption to a library group, creating the group if it is new. */
+export async function addCaptionToLibrary(text, groupName) {
+  const s = await getSettings();
+  const value = (text || '').trim();
+  if (!value) return null;
+  const lib = s.captionLib.map((g) => ({ ...g, items: [...g.items] }));
+  let group = lib.find((g) => g.group === groupName);
+  if (!group) { group = { group: groupName || 'General', items: [] }; lib.push(group); }
+  if (!group.items.some((i) => i.trim().toUpperCase() === value.toUpperCase())) group.items.push(value);
+  await saveSettings({ captionLib: lib });
+  return group.group;
+}
+
 export async function noteCaptionUse(text, sectionTitle) {
   if (!text) return;
   const s = await getSettings();

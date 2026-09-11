@@ -3,7 +3,7 @@ import { go, back } from '../app.js';
 import {
   getProject, listSections, listPhotos, addPhoto, updatePhoto, deletePhoto,
   reorderPhotos, movePhotos, getBlob, getSettings, noteCaptionUse, displayBlobId, updateSection,
-  photoTakenAt, usedComponents,
+  photoTakenAt, usedComponents, captionInLibrary, addCaptionToLibrary,
 } from '../store.js';
 import * as db from '../db.js';
 import { ingest, blobUrl, stampedCopy } from '../image.js';
@@ -19,7 +19,7 @@ export default async function renderSection(sectionId) {
       ui.empty('photos', 'Section not found', '', 'Projects', () => go('#/projects')));
   }
   const project = await getProject(section.projectId);
-  const settings = await getSettings();
+  let settings = await getSettings();
 
   const screen = ui.h('div', { class: 'screen' });
   const grid = ui.h('div', { class: 'pgrid' });
@@ -208,8 +208,37 @@ export default async function renderSection(sectionId) {
     const ta2 = ui.h('textarea', { class: 'cap-input', style: { minHeight: '48px', fontSize: '14px' }, placeholder: 'Second line (optional) — e.g. address or note', oninput: (e) => { caption2 = e.target.value; } });
     ta2.value = caption2;
 
+    // Offered only when what is typed is not already a library caption — the
+    // way an AI suggestion or a one-off phrase becomes part of the vocabulary.
+    const saveBtn = ui.h('button', { class: 'btn tinted wide', hidden: true },
+      ui.icon('plus', 20), ui.h('span', { text: 'Save to library' }));
+    const refreshSaveBtn = async () => {
+      const value = caption.trim();
+      saveBtn.hidden = !value || await captionInLibrary(value);
+    };
+    saveBtn.onclick = async () => {
+      const value = caption.trim();
+      if (!value) return;
+      const groups = settings.captionLib.map((g) => ({ label: g.group, value: g.group, icon: 'list', color: 'var(--sys-teal)' }));
+      const target = await ui.actionSheet('Save to which group?', [
+        ...groups, { label: 'New group…', value: '__new', icon: 'plus', color: 'var(--sys-green)' },
+      ]);
+      if (!target) return;
+      let groupName = target;
+      if (target === '__new') {
+        const g = await ui.prompt('New Group', 'e.g. Roofing', '', { okLabel: 'Create' });
+        if (!g || !g.trim()) return;
+        groupName = g.trim();
+      }
+      const saved = await addCaptionToLibrary(value, groupName);
+      settings = await getSettings(true);
+      await refreshSaveBtn();
+      ui.toast(`Added to ${saved}`);
+    };
+    ta.addEventListener('input', refreshSaveBtn);
+
     const ranked = rankCaptions(settings.captionLib, settings.usage, section.title, 14);
-    const setCap = (t) => { caption = t; ta.value = t; ui.haptic(); };
+    const setCap = (t) => { caption = t; ta.value = t; ui.haptic(); refreshSaveBtn(); };
     const quick = ui.h('div', { class: 'chips' },
       ...ranked.map((c) => ui.h('button', { class: 'chip' + (/- OK|NO DEFECT/.test(c.text) ? ' ok' : ''), text: c.text.replace(/\n/g, ' · '), onclick: () => setCap(c.text) })));
 
@@ -258,6 +287,7 @@ export default async function renderSection(sectionId) {
       ui.h('div', { class: 'group-title', style: { paddingTop: '12px' }, text: 'Caption' }), ta,
       ta2,
       ui.h('div', { class: 'btn-stack' },
+        saveBtn,
         aiBtn,
         ui.h('button', {
           class: 'btn gray wide',
@@ -273,6 +303,8 @@ export default async function renderSection(sectionId) {
             if (ok) { await deletePhoto(fresh.id); sh.close(); paint(); }
           },
         })));
+
+    await refreshSaveBtn();
 
     const sh = ui.sheet({
       title: queue ? 'Caption Photo' : 'Photo',
