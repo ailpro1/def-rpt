@@ -8,7 +8,7 @@ import {
 } from '../store.js';
 import { blobUrl } from '../image.js';
 import { draftSummary, aiReady, aiEnabled } from '../assist.js';
-import { buildReportPdf, reportFilename, planTableFormat } from '../report-pdf.js';
+import { buildReportPdf, reportFilename, planTableFormat, captionPageCount } from '../report-pdf.js';
 import { saveFile } from '../backup.js';
 
 const MM = 96 / 25.4;
@@ -211,7 +211,7 @@ export default async function renderReport(projectId) {
     const tablePlan = opts.format === 'table' ? planTableFormat(data, opts.perPage) : null;
     const sectionPages = tablePlan
       ? tablePlan.map((blocks) => blocks.reduce((n, b) => n + b.pages.length, 0))
-      : data.map((d) => Math.max(1, Math.ceil(d.photos.length / opts.perPage)));
+      : data.map((d) => captionPageCount(d.photos, opts.perPage));
     const totalPages = (opts.cover ? 1 : 0)
       + (opts.summary ? 1 : 0)
       + (opts.notes && settings.notesBody ? 1 : 0)
@@ -361,18 +361,32 @@ export default async function renderReport(projectId) {
       return;
     }
 
-    /* photo pages — paginated per section, matching the sample layout */
+    /* photo pages — paginated per component block within each section */
     for (const d of data) {
+      const blocks = componentBlocks(d.photos);
       const chunks = [];
-      for (let i = 0; i < d.photos.length; i += opts.perPage) chunks.push(d.photos.slice(i, i + opts.perPage));
-      if (!chunks.length) chunks.push([]);
+      blocks.forEach((b, bi) => {
+        for (let i = 0; i < b.photos.length; i += opts.perPage) {
+          chunks.push({ photos: b.photos.slice(i, i + opts.perPage), block: b, bi, first: i === 0 });
+        }
+        if (!b.photos.length) chunks.push({ photos: [], block: b, bi, first: true });
+      });
+      if (!chunks.length) chunks.push({ photos: [], block: { component: '' }, bi: 0, first: true });
+
       for (let i = 0; i < chunks.length; i++) {
         const pg = page();
         pg.appendChild(sectionHeader(d.section.title));
+        const b = chunks[i].block;
+        if (chunks[i].first && (b.component || blocks.length > 1)) {
+          pg.appendChild(ui.h('div', { class: 'rt-block',
+            text: b.component
+              ? `${chunks[i].bi + 1}.0 ${d.section.title.toUpperCase()} (${b.component})`
+              : `${chunks[i].bi + 1}.0 ${d.section.title.toUpperCase()}` }));
+        }
         const g = ui.h('div', { class: 'rgrid' });
         g.style.setProperty('--cols', String(cols()));
         g.style.setProperty('--rows', String(rows()));
-        for (const p of chunks[i]) g.appendChild(await photoCell(p));
+        for (const p of chunks[i].photos) g.appendChild(await photoCell(p));
         pg.appendChild(g);
         pageNo++;
         pg.appendChild(footer(footerLeft, perSection

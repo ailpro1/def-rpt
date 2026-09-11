@@ -1,7 +1,7 @@
 // Caption and section library. Everything a user taps on site comes from here,
 // so it is fully editable and survives in backups.
 import * as ui from '../ui.js';
-import { getSettings, saveSettings, COMPONENTS_ENABLED } from '../store.js';
+import { getSettings, saveSettings } from '../store.js';
 import { DEFAULT_CAPTIONS, DEFAULT_SECTIONS, DEFAULT_COMPONENTS } from '../captions.js';
 
 export default async function renderLibrary() {
@@ -14,9 +14,7 @@ export default async function renderLibrary() {
   const seg = ui.h('div', { class: 'segmented', style: { margin: '0 12px 12px' } },
     ui.h('button', { 'aria-selected': 'true', text: 'Captions', onclick: () => switchTab('captions') }),
     ui.h('button', { 'aria-selected': 'false', text: 'Sections', onclick: () => switchTab('sections') }),
-    COMPONENTS_ENABLED
-      ? ui.h('button', { 'aria-selected': 'false', text: 'Components', onclick: () => switchTab('components') })
-      : null);
+    ui.h('button', { 'aria-selected': 'false', text: 'Components', onclick: () => switchTab('components') }));
 
   screen.appendChild(ui.navbar({
     title: 'Library',
@@ -196,7 +194,8 @@ export default async function renderLibrary() {
         })));
     } else if (tab === 'components') {
       body.appendChild(ui.h('div', { class: 'hint',
-        text: 'The defect-table report groups each section\u2019s photos by component, and prints one table per group.' }));
+        text: 'Both report formats group a section\u2019s photos by component, each under its own numbered heading. '
+          + 'The defect-table format also prints one table per group.' }));
       body.appendChild(ui.group('Components',
         s.componentLib.map((t, i) => ui.row({ title: t, chevron: true, onclick: () => componentMenu(i) }))));
       body.appendChild(ui.h('div', { class: 'btn-stack' },

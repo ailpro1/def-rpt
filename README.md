@@ -143,26 +143,34 @@ Report Options -> Format.
 | | Photo captions | Defect table |
 |---|---|---|
 | Under each photo | Its caption | A number only |
-| Per section | 6 photos a page | Numbered photos grouped by **component** |
-| Closing each group | -- | A LOCATION / COMPONENT / DEFECT table at the foot of the page |
+| Grouping | Section, then component | Section, then component |
+| Closing each group | -- | A full-width LOCATION / COMPONENT / DEFECT table at the foot of the page |
 | Header / footer | Same | Same |
+
+Components apply to both formats: a section's photos group by component, each under
+its own numbered heading (`1.0 FRONT (STEEL GATE)`). A section with no components
+prints exactly as it always did.
 
 ### Defect table format
 
-One block per section, closing with the table:
+Numbered photos, closing with the table:
 
 ```
-FRONT                           <- section
+FRONT                        <- section, once
+1.0 FRONT (STEEL GATE)       <- component group
 
- 1 [photo]        2 [photo]
- 3 [photo]        4 [photo]
+ 1 [photo]      2 [photo]
+ 3 [photo]
 
-                  +----------+--------+-----------+----------+
-                  | LOCATION | FRONT  | COMPONENT |          |
-                  +----------+--------+-----------+----------+
-                  | DEFECT   | (PIC 1-2) RUSTY GATE ...      |
-                  +----------+-------------------------------+
++----------+-------+-----------+------------+
+| LOCATION | FRONT | COMPONENT | STEEL GATE |
++----------+-------+-----------+------------+
+| DEFECT   | (PIC 1-2) RUSTY GATE (PIC 3) … |
++----------+--------------------------------+
 ```
+
+The table runs the full width of the page, left to right, above the footer. Its rules
+are drawn at 1pt rather than a hairline, which disappears at phone zoom.
 
 The DEFECT cell is written from the captions: runs of photos sharing a caption
 collapse to `(PIC 1-3) UNFILLED GROUT   (PIC 4) HOLLOW TILE`, numbered from 1 within
@@ -176,12 +184,10 @@ what you check is what you get.
 
 Condition rating is deliberately not included.
 
-**COMPONENT is switched off.** The column prints, but empty. Splitting a section into
-components is the only part of this format that would need extra input on site, so it
-is built and tested but disabled behind `COMPONENTS_ENABLED` in `js/store.js`. Setting
-it to `true` restores the field in the photo sheet, the bulk **Set component** action
-and the Library tab; sections then split into numbered blocks
-(`1.0 FRONT (WALL FINISHES)`), each with its own table.
+Set a photo's component in its sheet, or several at once with **Set component** in
+select mode. Components come from Library -> Components. Photos with no component
+stay as one unnamed group, and its heading is dropped rather than repeating the
+section name.
 
 ## Report layout
 

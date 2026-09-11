@@ -59,14 +59,13 @@
 .rt-num{font-size:9pt;text-align:center;padding-top:1mm}
 .rt-cell .ph-wrap{position:relative;aspect-ratio:4/3;overflow:hidden;display:flex}
 .rt-cell .ph{width:100%;height:100%;object-fit:cover;display:block;background:#eee}
-/* The table closes each section, pinned above the footer as in the reference. */
-.rt-info{position:absolute;right:12mm;bottom:20mm;width:75mm;border-collapse:collapse;
-  font-size:8pt;line-height:1.25;background:#fff}
-.rt-info th,.rt-info td{border:.5pt solid #000;padding:1.1mm 1.4mm;text-align:left;
+/* The table closes each section, full width and pinned above the footer. */
+.rt-info{position:absolute;left:12mm;right:12mm;bottom:20mm;border-collapse:collapse;
+  font-size:8pt;line-height:1.25;background:#fff;table-layout:fixed}
+.rt-info th,.rt-info td{border:1pt solid #000;padding:1.6mm 2mm;text-align:left;
   vertical-align:top;font-weight:400}
-.rt-info th{font-weight:700;white-space:nowrap}
-.rt-info tr:first-child td:nth-of-type(1){width:20.2mm}
-.rt-info tr:first-child td:nth-of-type(2){width:17.9mm}
+.rt-info th{font-weight:700;white-space:nowrap;width:24mm}
+.rt-info th:nth-of-type(2){width:30mm}
 
 /* footer */
 .rfoot{border-top:1.2pt solid #000;padding-top:1.5mm;margin-top:4mm;

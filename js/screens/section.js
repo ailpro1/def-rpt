@@ -3,7 +3,7 @@ import { go, back } from '../app.js';
 import {
   getProject, listSections, listPhotos, addPhoto, updatePhoto, deletePhoto,
   reorderPhotos, movePhotos, getBlob, getSettings, noteCaptionUse, displayBlobId, updateSection,
-  photoTakenAt, usedComponents, COMPONENTS_ENABLED,
+  photoTakenAt, usedComponents,
 } from '../store.js';
 import * as db from '../db.js';
 import { ingest, blobUrl, stampedCopy } from '../image.js';
@@ -244,10 +244,10 @@ export default async function renderSection(sectionId) {
       onclick: () => editTakenAt(fresh, stampRow),
     });
 
-    const componentRow = !COMPONENTS_ENABLED ? null : ui.row({
+    const componentRow = ui.row({
       title: 'Component',
       value: fresh.component || 'Not set',
-      sub: 'Groups photos for the defect-table report',
+      sub: 'Groups photos within the section, in both report formats',
       chevron: true,
       onclick: () => editComponent(fresh, componentRow),
     });
@@ -431,9 +431,7 @@ export default async function renderSection(sectionId) {
     selectBar.append(
       ui.h('div', { class: 'hint', style: { textAlign: 'center' }, text: n ? `${n} selected` : 'Tap photos to select' }),
       ui.h('button', { class: 'btn wide', disabled: !n, text: 'Apply caption to selected', onclick: applyCaptionToSelected }),
-      COMPONENTS_ENABLED
-        ? ui.h('button', { class: 'btn tinted wide', disabled: !n, text: 'Set component', onclick: setComponentForSelected })
-        : null,
+      ui.h('button', { class: 'btn tinted wide', disabled: !n, text: 'Set component', onclick: setComponentForSelected }),
       ui.h('button', { class: 'btn tinted wide', disabled: !n, text: 'Move to another section', onclick: moveSelected }),
       aiEnabled ? ui.h('button', { class: 'btn gray wide', disabled: !n, text: 'AI caption selected', onclick: async () => {
         const list = photos.filter((p) => selected.has(p.id));
@@ -556,7 +554,7 @@ export default async function renderSection(sectionId) {
         ui.h('div', { text: p.caption ? p.caption.replace(/\n/g, ' · ') : 'Tap to caption' }),
         ui.h('div', { class: 'cap-time' },
           stamp ? stamp.split(' ')[1] : '',
-          COMPONENTS_ENABLED && p.component ? ` · ${p.component}` : '')));
+          p.component ? ` · ${p.component}` : '')));
       cell.addEventListener('click', () => {
         if (selectMode) {
           if (selected.has(p.id)) selected.delete(p.id); else selected.add(p.id);

@@ -77,7 +77,7 @@ export async function buildReportPdf({ project, settings, data, opts }) {
 
   const sectionPages = tableFormat
     ? plan.map((blocks) => blocks.reduce((n, b) => n + b.pages.length, 0))
-    : data.map((d) => Math.max(1, Math.ceil(d.photos.length / opts.perPage)));
+    : data.map((d) => captionPageCount(d.photos, opts.perPage));
   const totalPages = (opts.cover ? 1 : 0)
     + (opts.summary ? 1 : 0)
     + (opts.notes && settings.notesBody ? 1 : 0)
@@ -234,7 +234,7 @@ export async function buildReportPdf({ project, settings, data, opts }) {
 
           // The table closes the block, pinned to the bottom of its last page.
           if (pi === b.pages.length - 1) {
-            defectTable(doc, PAGE.w - L.side - T.tableW, gridBottom - b.tableH,
+            defectTable(doc, L.side, gridBottom - b.tableH,
               d.section.title, b.component, b.defect);
           }
 
@@ -252,24 +252,44 @@ export async function buildReportPdf({ project, settings, data, opts }) {
   const cols = opts.perPage <= 2 ? 1 : 2;
   const rows = Math.ceil(opts.perPage / cols);
   const colW = (contentW - L.colGap * (cols - 1)) / cols;
-  const rowH = (gridBottom - gridTop - L.rowGap * (rows - 1)) / rows;
+  // Components head their block here too; the band is reserved on every page so
+  // photos stay the same size whether or not a heading is printed above them.
+  const anyComponent = data.some((d) => d.photos.some((p) => p.component));
+  const headBand = anyComponent ? lineH(T.blockHeadSize) + 2 : 0;
+  const gridStart = gridTop + headBand;
+  const rowH = (gridBottom - gridStart - L.rowGap * (rows - 1)) / rows;
   const capLine = L.capSize * MM * 1.28;
   const capH = capLine * 2 + 1.4;
   const imgH = rowH - capH;
 
   for (const d of data) {
+    const blocks = componentBlocks(d.photos);
     const chunks = [];
-    for (let i = 0; i < d.photos.length; i += opts.perPage) chunks.push(d.photos.slice(i, i + opts.perPage));
-    if (!chunks.length) chunks.push([]);
+    blocks.forEach((b, bi) => {
+      for (let i = 0; i < b.photos.length; i += opts.perPage) {
+        chunks.push({ photos: b.photos.slice(i, i + opts.perPage), block: b, bi, first: i === 0 });
+      }
+      if (!b.photos.length) chunks.push({ photos: [], block: b, bi, first: true });
+    });
+    if (!chunks.length) chunks.push({ photos: [], block: { component: '' }, bi: 0, first: true });
 
     for (let c = 0; c < chunks.length; c++) {
       nextPage();
       header(doc, project.name, d.section.title);
 
-      for (let i = 0; i < chunks[c].length; i++) {
-        const photo = chunks[c][i];
+      const b = chunks[c].block;
+      if (chunks[c].first && (b.component || blocks.length > 1)) {
+        const label = b.component
+          ? `${chunks[c].bi + 1}.0 ${d.section.title.toUpperCase()} (${b.component})`
+          : `${chunks[c].bi + 1}.0 ${d.section.title.toUpperCase()}`;
+        doc.text(label, L.side, gridTop + T.blockHeadSize * MM * 0.8,
+          { font: 'bold', size: T.blockHeadSize });
+      }
+
+      for (let i = 0; i < chunks[c].photos.length; i++) {
+        const photo = chunks[c].photos[i];
         const cx = L.side + (i % cols) * (colW + L.colGap);
-        const cy = gridTop + Math.floor(i / cols) * (rowH + L.rowGap);
+        const cy = gridStart + Math.floor(i / cols) * (rowH + L.rowGap);
 
         const jpeg = await bytesOf(displayBlobId(photo));
         if (jpeg) {
@@ -308,14 +328,17 @@ const T = {
   numCol: 8,            // the narrow column carrying the picture number
   colGap: 4,
   rowGap: 4,
-  tableW: 75,           // as the reference documents have it, right-aligned
   tableFont: 8,
-  cellPadX: 1.4,
-  cellPadY: 1.1,
+  cellPadX: 2,
+  cellPadY: 1.6,
+  // 0.5pt hairlines all but disappear at phone zoom, so the grid is drawn at 1pt.
+  tableRule: 0.35,
   sectionHeadSize: 14,
   blockHeadSize: 11,
 };
-const T_COLS = [17.2, 20.2, 19.6, 17.9];        // LOCATION | value | COMPONENT | value
+// Full content width: LOCATION | value | COMPONENT | value
+const T_COLS = [24, 66, 30, 66];
+
 const photoW = (contentW - (T.numCol + T.colGap) * 2 + T.colGap) / 2;
 const photoH = photoW / (4 / 3);
 const photoRowH = photoH + T.rowGap;
@@ -339,7 +362,7 @@ function defectTable(doc, x, y, location, component, defect) {
   const f = T.tableFont;
   const spanW = T_COLS[1] + T_COLS[2] + T_COLS[3];
   const cell = (cx, cy, w, h, text, bold) => {
-    doc.rect(cx, cy, w, h, { stroke: [0, 0, 0], lineWidth: 0.18 });
+    doc.rect(cx, cy, w, h, { stroke: [0, 0, 0], lineWidth: T.tableRule });
     doc.textBlock(text || '', cx + T.cellPadX, cy + T.cellPadY, w - T.cellPadX * 2,
       { size: f, font: bold ? 'bold' : 'regular', lineHeight: 1.25 });
   };
@@ -367,6 +390,13 @@ function defectTable(doc, x, y, location, component, defect) {
  * paginates identically to the PDF — the table's height decides how many photos
  * fit on a block's last page, and that is not something the preview can guess.
  */
+/** Pages a section needs in the caption format, now that blocks start a page. */
+export function captionPageCount(photos, perPage) {
+  const blocks = componentBlocks(photos);
+  if (!blocks.length) return 1;
+  return blocks.reduce((n, b) => n + Math.max(1, Math.ceil(b.photos.length / perPage)), 0);
+}
+
 export function planTableFormat(data, perPage) {
   return data.map((d) => componentBlocks(d.photos).map((b) => {
     const defect = defectSummary(b.photos);
