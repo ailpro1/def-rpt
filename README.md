@@ -135,6 +135,53 @@ store on a phone that has both installed.
 A single-project file carries no settings, so it cannot overwrite the office's
 company details, logo or caption library.
 
+## Report layouts
+
+Two, chosen in Settings -> Report Defaults -> **Layout**, or per report in
+Report Options -> Format.
+
+| | Photo captions | Defect table |
+|---|---|---|
+| Under each photo | Its caption | A number only |
+| Per section | 6 photos a page | Numbered photos grouped by **component** |
+| Closing each group | -- | A LOCATION / COMPONENT / DEFECT table at the foot of the page |
+| Header / footer | Same | Same |
+
+### Defect table format
+
+Each section's photos are grouped by their **component** (WALL FINISHES, STEEL GATE,
+FLOOR FINISHES ...), and each group prints as:
+
+```
+FRONT                           <- section, once
+1.0 FRONT (WALL FINISHES)       <- group
+
+ 1 [photo]        2 [photo]
+ 3 [photo]        4 [photo]
+
+                  +----------+--------+-----------+----------+
+                  | LOCATION | FRONT  | COMPONENT | WALL FIN |
+                  +----------+--------+-----------+----------+
+                  | DEFECT   | (PIC 1-3) UNEVEN PLASTER ...  |
+                  +----------+-------------------------------+
+```
+
+The DEFECT cell is written from the captions: runs of photos sharing a caption
+collapse to `(PIC 1-3) UNFILLED GROUT   (PIC 4) HOLLOW TILE`, numbered from 1 within
+the group. Photo numbers replace the per-photo captions, exactly as the table refers
+to them.
+
+The table is pinned to the bottom of the group's last page. Its height is measured
+first, and the page fit is reduced when a long defect list needs the room -- so the
+table never lands on top of a photo. The preview and the PDF share that planner, so
+what you check is what you get.
+
+Set a photo's component in its sheet, or several at once from **Set component** in
+select mode. Components come from Library -> Components; photos with no component
+stay as one unnamed group per section.
+
+Condition rating is deliberately not included.
+
 ## Report layout
 
 Photo pages reproduce the standard inspection layout:

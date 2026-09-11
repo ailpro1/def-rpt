@@ -4,10 +4,11 @@ import { go } from '../app.js';
 import {
   getProject, listSections, listPhotos, getBlob, getSettings,
   displayBlobId, isOkCaption, updateProject, photoTakenAt,
+  componentBlocks, defectSummary,
 } from '../store.js';
 import { blobUrl } from '../image.js';
 import { draftSummary, aiReady, aiEnabled } from '../assist.js';
-import { buildReportPdf, reportFilename } from '../report-pdf.js';
+import { buildReportPdf, reportFilename, planTableFormat } from '../report-pdf.js';
 import { saveFile } from '../backup.js';
 
 const MM = 96 / 25.4;
@@ -34,6 +35,7 @@ export default async function renderReport(projectId) {
     skipEmpty: true,
     stamp: settings.stampEnabled !== false,
     numbering: settings.pageNumbering || 'document',
+    format: settings.reportFormat || 'captions',
   };
 
   screen.appendChild(ui.navbar({
@@ -48,6 +50,22 @@ export default async function renderReport(projectId) {
 
   function optionsSheet() {
     const body = ui.h('div', {},
+      ui.group('Format', [
+        ui.row({
+          title: 'Layout',
+          sub: opts.format === 'table'
+            ? 'Numbered photos with a defect table per section'
+            : 'A caption under every photo',
+          right: ui.h('select', {
+            onchange: (e) => { opts.format = e.target.value; build(); },
+            style: { border: 0, background: 'none', fontSize: '15px', color: 'var(--label-2)' },
+          }, ...[['captions', 'Photo captions'], ['table', 'Defect table']].map(([v, label]) => {
+            const o = ui.h('option', { value: v, text: label });
+            if (v === opts.format) o.selected = true;
+            return o;
+          })),
+        }),
+      ]),
       ui.group('Include', [
         ui.switchRow('Cover page', opts.cover, (v) => { opts.cover = v; build(); }),
         ui.switchRow('Executive summary', opts.summary, (v) => { opts.summary = v; build(); }),
@@ -190,7 +208,10 @@ export default async function renderReport(projectId) {
     // Address is no longer in the header, so it rides in the footer instead.
     const footerLeft = settings.footerText || project.address || '';
     const perSection = opts.numbering === 'section';
-    const sectionPages = data.map((d) => Math.max(1, Math.ceil(d.photos.length / opts.perPage)));
+    const tablePlan = opts.format === 'table' ? planTableFormat(data, opts.perPage) : null;
+    const sectionPages = tablePlan
+      ? tablePlan.map((blocks) => blocks.reduce((n, b) => n + b.pages.length, 0))
+      : data.map((d) => Math.max(1, Math.ceil(d.photos.length / opts.perPage)));
     const totalPages = (opts.cover ? 1 : 0)
       + (opts.summary ? 1 : 0)
       + (opts.notes && settings.notesBody ? 1 : 0)
@@ -265,6 +286,78 @@ export default async function renderReport(projectId) {
       pageNo++;
       n.appendChild(footer(footerLeft, perSection ? '' : `page ${pageNo} of ${totalPages}`));
       pages.push(n);
+    }
+
+    /* photo pages — defect-table format */
+    if (opts.format === 'table') {
+      for (let si = 0; si < data.length; si++) {
+        const d = data[si];
+        const blocks = tablePlan[si];
+        let first = true;
+        for (let bi = 0; bi < blocks.length; bi++) {
+          const b = blocks[bi];
+          const defect = b.defect;
+          const chunks = b.pages.map(([from, to]) => b.photos.slice(from, to));
+
+          for (let c = 0; c < chunks.length; c++) {
+            const pg = page('rtable');
+            pg.appendChild(sectionHeader(d.section.title));
+            const body2 = ui.h('div', { class: 'rt-body' });
+            if (first) {
+              body2.appendChild(ui.h('div', { class: 'rt-section', text: d.section.title.toUpperCase() }));
+              first = false;
+            }
+            if (c === 0) {
+              body2.appendChild(ui.h('div', { class: 'rt-block',
+                text: b.component
+                  ? `${bi + 1}.0 ${d.section.title.toUpperCase()} (${b.component})`
+                  : `${bi + 1}.0 ${d.section.title.toUpperCase()}` }));
+            }
+            const grid = ui.h('div', { class: 'rt-grid' });
+            for (let i = 0; i < chunks[c].length; i++) {
+              const p = chunks[c][i];
+              const n = b.pages[c][0] + i + 1;
+              const cell = ui.h('div', { class: 'rt-cell' }, ui.h('div', { class: 'rt-num', text: String(n) }));
+              const wrapEl = ui.h('div', { class: 'ph-wrap' });
+              const img = ui.h('img', { class: 'ph' });
+              const id = displayBlobId(p);
+              const blob = await getBlob(id);
+              if (blob) img.src = blobUrl(id + ':rpt', blob);
+              wrapEl.appendChild(img);
+              if (opts.stamp) {
+                const text = ui.formatStamp(photoTakenAt(p), settings.stampFormat);
+                if (text) wrapEl.appendChild(ui.h('div', { class: 'ph-stamp ' + (settings.stampPosition || 'br'), text }));
+              }
+              cell.appendChild(wrapEl);
+              grid.appendChild(cell);
+            }
+            body2.appendChild(grid);
+            pg.appendChild(body2);
+
+            if (c === chunks.length - 1) {
+              pg.appendChild(ui.h('table', { class: 'rt-info' }, ui.h('tbody', {},
+                ui.h('tr', {},
+                  ui.h('th', { text: 'LOCATION' }),
+                  ui.h('td', { text: d.section.title }),
+                  ui.h('th', { text: 'COMPONENT' }),
+                  ui.h('td', { text: b.component || '-' })),
+                ui.h('tr', {},
+                  ui.h('th', { text: 'DEFECT' }),
+                  ui.h('td', { colspan: '3', text: defect || '-' })))));
+            }
+
+            pageNo++;
+            pg.appendChild(footer(footerLeft, perSection
+              ? `page ${c + 1} of ${chunks.length}`
+              : `page ${pageNo} of ${totalPages}`));
+            pages.push(pg);
+          }
+        }
+      }
+      ui.clear(wrap);
+      pages.forEach((p) => wrap.appendChild(ui.h('div', { class: 'rpage-holder' }, p)));
+      scalePages();
+      return;
     }
 
     /* photo pages — paginated per section, matching the sample layout */

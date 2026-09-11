@@ -3,7 +3,7 @@ import { go, back } from '../app.js';
 import {
   getProject, listSections, listPhotos, addPhoto, updatePhoto, deletePhoto,
   reorderPhotos, movePhotos, getBlob, getSettings, noteCaptionUse, displayBlobId, updateSection,
-  photoTakenAt,
+  photoTakenAt, usedComponents,
 } from '../store.js';
 import * as db from '../db.js';
 import { ingest, blobUrl, stampedCopy } from '../image.js';
@@ -244,9 +244,17 @@ export default async function renderSection(sectionId) {
       onclick: () => editTakenAt(fresh, stampRow),
     });
 
+    const componentRow = ui.row({
+      title: 'Component',
+      value: fresh.component || 'Not set',
+      sub: 'Groups photos for the defect-table report',
+      chevron: true,
+      onclick: () => editComponent(fresh, componentRow),
+    });
+
     const body = ui.h('div', {},
       img,
-      ui.h('div', { class: 'list', style: { margin: '12px 12px 0' } }, stampRow),
+      ui.h('div', { class: 'list', style: { margin: '12px 12px 0' } }, stampRow, componentRow),
       ui.h('div', { class: 'group-title', style: { paddingTop: '12px' }, text: 'Caption' }), ta,
       ta2,
       ui.h('div', { class: 'btn-stack' },
@@ -286,6 +294,70 @@ export default async function renderSection(sectionId) {
       });
       obs.observe(document.getElementById('sheet-host'), { childList: true });
     });
+  }
+
+  /* ---------------- component ---------------- */
+  async function componentChoices() {
+    const used = await usedComponents(section.projectId);
+    // What this job already uses first, then the rest of the library.
+    return [...used, ...settings.componentLib.filter((c) => !used.includes(c.toUpperCase()))];
+  }
+
+  async function editComponent(photo, rowEl) {
+    const choices = await componentChoices();
+    let value = photo.component || '';
+    const field = ui.h('input', {
+      type: 'text', value, placeholder: 'e.g. WALL FINISHES',
+      autocapitalize: 'characters', spellcheck: 'false',
+      oninput: (e) => { value = e.target.value; },
+    });
+    ui.autocomplete(field, {
+      source: (q) => {
+        const needle = q.trim().toUpperCase();
+        return choices
+          .filter((c) => c.toUpperCase().includes(needle))
+          .slice(0, 8)
+          .map((c) => ({ text: c }));
+      },
+      onPick: (item) => { value = item.text; field.value = item.text; },
+    });
+
+    const chips = ui.h('div', { class: 'chips' },
+      ...choices.slice(0, 14).map((c) => ui.h('button', {
+        class: 'chip', text: c,
+        onclick: () => { value = c; field.value = c; ui.haptic(); },
+      })));
+
+    const body = ui.h('div', {},
+      ui.h('div', { class: 'hint', text: 'The defect-table report groups a section\u2019s photos by component, '
+        + 'and each group gets its own numbered photos and table. Leave blank to keep the section as one group.' }),
+      ui.group('', [ui.h('div', { class: 'row stack' }, ui.h('label', { text: 'Component' }), field)]),
+      chips);
+
+    ui.sheet({
+      title: 'Component', body, rightLabel: 'Save',
+      onRight: async () => {
+        const next = value.trim().toUpperCase();
+        await updatePhoto(photo.id, { component: next });
+        photo.component = next;
+        if (rowEl) rowEl.querySelector('.r-val').textContent = next || 'Not set';
+        ui.toast(next ? 'Component saved' : 'Component cleared');
+        paint();
+      },
+    });
+  }
+
+  async function setComponentForSelected() {
+    const choices = await componentChoices();
+    const picked = await ui.actionSheet(`Component for ${selected.size} photo(s)`, [
+      ...choices.slice(0, 12).map((c) => ({ label: c, value: c, icon: 'list', color: 'var(--sys-teal)' })),
+      { label: 'Clear component', value: '__clear', icon: 'x', color: 'var(--sys-gray)' },
+    ]);
+    if (!picked) return;
+    const value = picked === '__clear' ? '' : picked;
+    for (const id of selected) await updatePhoto(id, { component: value });
+    toggleSelect(false);
+    ui.toast(value ? `Set to ${value}` : 'Component cleared');
   }
 
   /* ---------------- capture time ---------------- */
@@ -359,6 +431,7 @@ export default async function renderSection(sectionId) {
     selectBar.append(
       ui.h('div', { class: 'hint', style: { textAlign: 'center' }, text: n ? `${n} selected` : 'Tap photos to select' }),
       ui.h('button', { class: 'btn wide', disabled: !n, text: 'Apply caption to selected', onclick: applyCaptionToSelected }),
+      ui.h('button', { class: 'btn tinted wide', disabled: !n, text: 'Set component', onclick: setComponentForSelected }),
       ui.h('button', { class: 'btn tinted wide', disabled: !n, text: 'Move to another section', onclick: moveSelected }),
       aiEnabled ? ui.h('button', { class: 'btn gray wide', disabled: !n, text: 'AI caption selected', onclick: async () => {
         const list = photos.filter((p) => selected.has(p.id));
@@ -479,7 +552,9 @@ export default async function renderSection(sectionId) {
       const stamp = ui.formatStamp(photoTakenAt(p), 'dmy24');
       cell.appendChild(ui.h('div', { class: 'cap' },
         ui.h('div', { text: p.caption ? p.caption.replace(/\n/g, ' · ') : 'Tap to caption' }),
-        stamp ? ui.h('div', { class: 'cap-time', text: stamp.split(' ')[1] }) : null));
+        ui.h('div', { class: 'cap-time' },
+          stamp ? stamp.split(' ')[1] : '',
+          p.component ? ` · ${p.component}` : '')));
       cell.addEventListener('click', () => {
         if (selectMode) {
           if (selected.has(p.id)) selected.delete(p.id); else selected.add(p.id);

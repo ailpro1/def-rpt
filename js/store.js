@@ -1,7 +1,7 @@
 // Domain layer: projects, sections, photos, settings.
 import * as db from './db.js';
 import { BUILD } from './build.js';
-import { DEFAULT_CAPTIONS, DEFAULT_SECTIONS } from './captions.js';
+import { DEFAULT_CAPTIONS, DEFAULT_SECTIONS, DEFAULT_COMPONENTS } from './captions.js';
 
 export const SETTINGS_ID = 'app';
 
@@ -28,6 +28,7 @@ export const DEFAULT_SETTINGS = {
   notesTitle: 'NOTES & LIMITATIONS',
   notesBody: '',
   footerText: '',
+  reportFormat: 'captions',    // 'captions' = photo captions; 'table' = defect table per section
   photosPerPage: 6,
   pageNumbering: 'document',   // 'document' = page 4 of 17; 'section' = the older per-section style
   stampEnabled: true,
@@ -39,6 +40,7 @@ export const DEFAULT_SETTINGS = {
   aiImagePx: 768,          // one Gemini image tile — cheapest useful size
   captionLib: DEFAULT_CAPTIONS,
   sectionLib: DEFAULT_SECTIONS,
+  componentLib: DEFAULT_COMPONENTS,
   usage: {},              // caption text -> {n,last,sections{}}
   ai: { key: '', model: 'gemini-2.5-flash', enabled: false, auto: true, available: [], checkedAt: null },
   lastBackupAt: null,
@@ -205,6 +207,7 @@ export async function addPhoto(projectId, sectionId, blob, thumb, meta = {}) {
     projectId, sectionId, blobId, thumbId,
     takenAt: meta.takenAt || Date.now(),
     takenSource: meta.takenSource || 'now',
+    component: '',
     flatBlobId: null,
     ops: [],
     caption: '',
@@ -277,6 +280,51 @@ export const deleteBlob = (id) => (id ? db.del(db.STORES.blobs, id) : Promise.re
 
 /* Display blob: flattened (annotated) version if present, else original. */
 export const displayBlobId = (photo) => photo.flatBlobId || photo.blobId;
+
+/* ------------------------- defect-table grouping ------------------------- */
+
+/**
+ * Split a section's photos into COMPONENT blocks for the defect-table format.
+ * Photos keep their order; blocks appear in the order their component is first
+ * seen. Photos with no component fall into one unnamed block.
+ */
+export function componentBlocks(photos) {
+  const order = [];
+  const byComponent = new Map();
+  photos.forEach((p) => {
+    const key = (p.component || '').trim().toUpperCase();
+    if (!byComponent.has(key)) { byComponent.set(key, []); order.push(key); }
+    byComponent.get(key).push(p);
+  });
+  return order.map((component) => ({ component, photos: byComponent.get(component) }));
+}
+
+/**
+ * The DEFECT cell: captions collapsed into picture references, the way the
+ * reference reports read — "(PIC 1-3) UNFILLED GROUT  (PIC 4) HOLLOW TILE".
+ * Photos are numbered from 1 within their block.
+ */
+export function defectSummary(photos) {
+  const runs = [];
+  photos.forEach((p, i) => {
+    const caption = (p.caption || '').replace(/\n/g, ' ').trim().toUpperCase();
+    if (!caption) return;
+    const last = runs[runs.length - 1];
+    if (last && last.caption === caption && last.to === i) last.to = i + 1;
+    else runs.push({ caption, from: i, to: i + 1 });
+  });
+  return runs
+    .map((r) => `(PIC ${r.from + 1}${r.to > r.from + 1 ? `-${r.to}` : ''}) ${r.caption}`)
+    .join('   ');
+}
+
+/** Components already used in a project, for suggesting the next one. */
+export async function usedComponents(projectId) {
+  const photos = await listProjectPhotos(projectId);
+  const seen = new Set();
+  photos.forEach((p) => { if (p.component) seen.add(p.component.trim().toUpperCase()); });
+  return [...seen].sort();
+}
 
 /** When the photo was taken. Falls back for records made before stamps existed. */
 export const photoTakenAt = (photo) =>

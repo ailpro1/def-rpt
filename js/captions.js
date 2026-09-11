@@ -1,6 +1,15 @@
 // Default caption + section library. Everything here is user-editable in
 // Settings > Library; these are only the seeds for a fresh install.
 
+// Building elements, as the second report format's COMPONENT column uses them.
+export const DEFAULT_COMPONENTS = [
+  'WALL FINISHES', 'FLOOR FINISHES', 'CEILING FINISHES', 'TABLE TOP FINISHES',
+  'DOOR & FRAME ASSEMBLY', 'WINDOW ASSEMBLY', 'STEEL GATE', 'IRON WORK',
+  'METAL WORK - RAILING', 'ROOF COVERING SYSTEM', 'SANITARY SYSTEM',
+  'WATER SUPPLY SYSTEM', 'DRAINAGE SYSTEM', 'ELECTRICAL INSTALLATION',
+  'SOCKET OUTLET / RCD PROTECTION', 'IRONMONGERY', 'GENERAL',
+];
+
 export const DEFAULT_SECTIONS = [
   'CAR PORCH', 'EXTERNAL FRONT', 'EXTERNAL REAR', 'LIVING', 'DINING',
   'KITCHEN', 'YARD', 'STAIRCASE | HALL', 'BATH 1', 'BATH 2', 'BATH 3',

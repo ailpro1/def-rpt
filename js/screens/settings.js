@@ -209,6 +209,20 @@ export default async function renderSettings() {
 
     /* report defaults */
     body.appendChild(ui.group('Report Defaults', [
+      ui.row({
+        title: 'Layout',
+        sub: (s.reportFormat || 'captions') === 'table'
+          ? 'Numbered photos, defect table per section'
+          : 'A caption under every photo',
+        right: ui.h('select', {
+          onchange: (e) => set({ reportFormat: e.target.value }).then(paint),
+          style: { border: 0, background: 'none', fontSize: '15px', color: 'var(--label-2)' },
+        }, ...[['captions', 'Photo captions'], ['table', 'Defect table']].map(([v, label]) => {
+          const o = ui.h('option', { value: v, text: label });
+          if (v === (s.reportFormat || 'captions')) o.selected = true;
+          return o;
+        })),
+      }),
       ui.inputRow('Report title', s.reportTitle, (v) => set({ reportTitle: v })),
       ui.switchRow('Cover page', s.coverEnabled, (v) => set({ coverEnabled: v })),
       ui.inputRow('Cover kicker', s.coverKicker, (v) => set({ coverKicker: v })),

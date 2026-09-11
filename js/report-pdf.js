@@ -2,7 +2,9 @@
 // the output carries nothing the browser wants to add to a printed page.
 // Geometry here mirrors css/report.css — change both together.
 import { createPdf, measure, wrap, PAGE } from './pdf.js';
-import { getBlob, displayBlobId, isOkCaption, photoTakenAt } from './store.js';
+import {
+  getBlob, displayBlobId, isOkCaption, photoTakenAt, componentBlocks, defectSummary,
+} from './store.js';
 import { formatStamp, fmtDate } from './ui.js';
 
 const MM = 25.4 / 72;                 // one point, in mm
@@ -50,7 +52,11 @@ function footer(doc, left, right) {
 }
 
 /**
- * @param opts { cover, summary, summaryTable, notes, perPage, stamp, draft }
+ * @param opts { format, cover, summary, summaryTable, notes, perPage, stamp,
+ *               numbering, draft }
+ *   format 'captions' — a caption under every photo (the original layout)
+ *   format 'table'    — numbered photos, with a LOCATION/COMPONENT/DEFECT table
+ *                       at the bottom of each section
  * @returns {Promise<Blob>}
  */
 export async function buildReportPdf({ project, settings, data, opts }) {
@@ -64,7 +70,14 @@ export async function buildReportPdf({ project, settings, data, opts }) {
 
   // Page counts are worked out before anything is drawn, so a footer can say
   // "page 4 of 17" on the page where it is printed.
-  const sectionPages = data.map((d) => Math.max(1, Math.ceil(d.photos.length / opts.perPage)));
+  const tableFormat = opts.format === 'table';
+
+  // Work out the body pages for whichever layout is in play.
+  const plan = tableFormat ? planTableFormat(data, opts.perPage) : null;
+
+  const sectionPages = tableFormat
+    ? plan.map((blocks) => blocks.reduce((n, b) => n + b.pages.length, 0))
+    : data.map((d) => Math.max(1, Math.ceil(d.photos.length / opts.perPage)));
   const totalPages = (opts.cover ? 1 : 0)
     + (opts.summary ? 1 : 0)
     + (opts.notes && settings.notesBody ? 1 : 0)
@@ -170,7 +183,70 @@ export async function buildReportPdf({ project, settings, data, opts }) {
     if (opts.draft) draftMark(doc);
   }
 
-  /* ---------- photo pages ---------- */
+  /* ---------- photo pages: defect-table format ---------- */
+  if (tableFormat) {
+    for (let si = 0; si < data.length; si++) {
+      const d = data[si];
+      const blocks = plan[si];
+      let first = true;
+      for (let bi = 0; bi < blocks.length; bi++) {
+        const b = blocks[bi];
+        for (let pi = 0; pi < b.pages.length; pi++) {
+          const [from, to] = b.pages[pi];
+          nextPage();
+          header(doc, project.name, d.section.title);
+
+          let y = gridTop;
+          if (first) {
+            doc.text(d.section.title.toUpperCase(), L.side, y + T.sectionHeadSize * MM * 0.8,
+              { font: 'bold', size: T.sectionHeadSize });
+            y += lineH(T.sectionHeadSize) + 1.5;
+            first = false;
+          }
+          if (pi === 0) {
+            const label = b.component
+              ? `${bi + 1}.0 ${d.section.title.toUpperCase()} (${b.component})`
+              : `${bi + 1}.0 ${d.section.title.toUpperCase()}`;
+            doc.text(label, L.side, y + T.blockHeadSize * MM * 0.8, { font: 'bold', size: T.blockHeadSize });
+            y += lineH(T.blockHeadSize) + 2;
+          }
+
+          for (let i = from; i < to; i++) {
+            const photo = b.photos[i];
+            const slot = i - from;
+            const cx = L.side + (slot % 2) * (T.numCol + photoW + T.colGap);
+            const cy = y + Math.floor(slot / 2) * photoRowH;
+            // The number replaces a caption: the defect table refers to it.
+            doc.text(String(i + 1), cx + T.numCol / 2, cy + 4.5, { size: 9, align: 'center' });
+            const jpeg = await bytesOf(displayBlobId(photo));
+            if (jpeg) {
+              doc.image(jpeg, cx + T.numCol, cy, photoW, photoH, { fit: 'cover' });
+              if (opts.stamp) {
+                const text = formatStamp(photoTakenAt(photo), settings.stampFormat);
+                if (text) stamp(doc, text, cx + T.numCol, cy, photoW, photoH, settings.stampPosition || 'br');
+              }
+            } else {
+              doc.rect(cx + T.numCol, cy, photoW, photoH, { fill: [238, 238, 238] });
+            }
+          }
+
+          // The table closes the block, pinned to the bottom of its last page.
+          if (pi === b.pages.length - 1) {
+            defectTable(doc, PAGE.w - L.side - T.tableW, gridBottom - b.tableH,
+              d.section.title, b.component, b.defect);
+          }
+
+          footer(doc, footLeft, perSection
+            ? `page ${pi + 1} of ${b.pages.length}`
+            : `page ${pageNo} of ${totalPages}`);
+          if (opts.draft) draftMark(doc);
+        }
+      }
+    }
+    return doc.build();
+  }
+
+  /* ---------- photo pages: caption format ---------- */
   const cols = opts.perPage <= 2 ? 1 : 2;
   const rows = Math.ceil(opts.perPage / cols);
   const colW = (contentW - L.colGap * (cols - 1)) / cols;
@@ -219,6 +295,110 @@ export async function buildReportPdf({ project, settings, data, opts }) {
   }
 
   return doc.build();
+}
+
+/* ------------------------- defect-table format ------------------------- */
+/* Photos run two to a row with a number beside each, and each COMPONENT block
+   closes with a LOCATION / COMPONENT / DEFECT table pinned to the bottom of its
+   last page. Header and footer are unchanged from the caption format. */
+
+const T = {
+  numCol: 8,            // the narrow column carrying the picture number
+  colGap: 4,
+  rowGap: 4,
+  tableW: 75,           // as the reference documents have it, right-aligned
+  tableFont: 8,
+  cellPadX: 1.4,
+  cellPadY: 1.1,
+  sectionHeadSize: 14,
+  blockHeadSize: 11,
+};
+const T_COLS = [17.2, 20.2, 19.6, 17.9];        // LOCATION | value | COMPONENT | value
+const photoW = (contentW - (T.numCol + T.colGap) * 2 + T.colGap) / 2;
+const photoH = photoW / (4 / 3);
+const photoRowH = photoH + T.rowGap;
+
+const lineH = (size) => size * MM * 1.25;
+
+/** Height the defect table will need, so space can be reserved for it. */
+function tableHeight(doc, location, component, defect) {
+  const spanW = T_COLS[1] + T_COLS[2] + T_COLS[3] - T.cellPadX * 2;
+  const row1 = Math.max(
+    lineH(T.tableFont),
+    ...[[location, T_COLS[1]], [component, T_COLS[3]]].map(([v, w]) =>
+      wrap(v || '-', w - T.cellPadX * 2, { size: T.tableFont }).length * lineH(T.tableFont)),
+  ) + T.cellPadY * 2;
+  const row2 = wrap(defect || '-', spanW, { size: T.tableFont }).length * lineH(T.tableFont) + T.cellPadY * 2;
+  void doc;
+  return row1 + row2;
+}
+
+function defectTable(doc, x, y, location, component, defect) {
+  const f = T.tableFont;
+  const spanW = T_COLS[1] + T_COLS[2] + T_COLS[3];
+  const cell = (cx, cy, w, h, text, bold) => {
+    doc.rect(cx, cy, w, h, { stroke: [0, 0, 0], lineWidth: 0.18 });
+    doc.textBlock(text || '', cx + T.cellPadX, cy + T.cellPadY, w - T.cellPadX * 2,
+      { size: f, font: bold ? 'bold' : 'regular', lineHeight: 1.25 });
+  };
+
+  const h1 = Math.max(
+    lineH(f),
+    ...[[location, T_COLS[1]], [component, T_COLS[3]]].map(([v, w]) =>
+      wrap(v || '-', w - T.cellPadX * 2, { size: f }).length * lineH(f)),
+  ) + T.cellPadY * 2;
+  const h2 = wrap(defect || '-', spanW - T.cellPadX * 2, { size: f }).length * lineH(f) + T.cellPadY * 2;
+
+  let cx = x;
+  cell(cx, y, T_COLS[0], h1, 'LOCATION', true); cx += T_COLS[0];
+  cell(cx, y, T_COLS[1], h1, location || '-'); cx += T_COLS[1];
+  cell(cx, y, T_COLS[2], h1, 'COMPONENT', true); cx += T_COLS[2];
+  cell(cx, y, T_COLS[3], h1, component || '-');
+
+  cell(x, y + h1, T_COLS[0], h2, 'DEFECT', true);
+  cell(x + T_COLS[0], y + h1, spanW, h2, defect || '-');
+  return h1 + h2;
+}
+
+/**
+ * The page plan for the defect-table format. Exported so the on-screen preview
+ * paginates identically to the PDF — the table's height decides how many photos
+ * fit on a block's last page, and that is not something the preview can guess.
+ */
+export function planTableFormat(data, perPage) {
+  return data.map((d) => componentBlocks(d.photos).map((b) => {
+    const defect = defectSummary(b.photos);
+    const tableH = tableHeight(null, d.section.title, b.component, defect);
+    return { ...b, defect, tableH, pages: paginateBlock(b.photos.length, perPage, tableH) };
+  }));
+}
+
+/**
+ * Split a block's photos across pages, leaving room on the final page for the
+ * defect table so it can sit at the bottom of the section.
+ */
+function paginateBlock(count, perPage, tableH) {
+  const cols = 2;
+  // Allow for the section and block headings that sit above the photos.
+  const headRoom = lineH(T.sectionHeadSize) + lineH(T.blockHeadSize) + 4;
+  const fullRows = Math.max(1, Math.floor((gridBottom - gridTop - headRoom) / photoRowH));
+  const perFull = Math.min(perPage, fullRows * cols);
+  const lastRows = Math.max(0, Math.floor((gridBottom - gridTop - headRoom - tableH - 4) / photoRowH));
+  const perLast = Math.max(cols, lastRows * cols);
+
+  const pages = [];
+  let i = 0;
+  if (count === 0) return [[0, 0]];
+  while (i < count) {
+    const remaining = count - i;
+    if (remaining <= perLast) { pages.push([i, count]); break; }
+    // Never leave a tail so large that the table would sit on top of a photo.
+    let take = perFull;
+    if (remaining - take === 0) take = Math.max(cols, perFull - cols);
+    pages.push([i, i + take]);
+    i += take;
+  }
+  return pages;
 }
 
 /** Camera-style capture time, inside the photo. */

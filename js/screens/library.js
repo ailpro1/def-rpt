@@ -2,7 +2,7 @@
 // so it is fully editable and survives in backups.
 import * as ui from '../ui.js';
 import { getSettings, saveSettings } from '../store.js';
-import { DEFAULT_CAPTIONS, DEFAULT_SECTIONS } from '../captions.js';
+import { DEFAULT_CAPTIONS, DEFAULT_SECTIONS, DEFAULT_COMPONENTS } from '../captions.js';
 
 export default async function renderLibrary() {
   let s = await getSettings(true);
@@ -13,7 +13,8 @@ export default async function renderLibrary() {
 
   const seg = ui.h('div', { class: 'segmented', style: { margin: '0 12px 12px' } },
     ui.h('button', { 'aria-selected': 'true', text: 'Captions', onclick: () => switchTab('captions') }),
-    ui.h('button', { 'aria-selected': 'false', text: 'Sections', onclick: () => switchTab('sections') }));
+    ui.h('button', { 'aria-selected': 'false', text: 'Sections', onclick: () => switchTab('sections') }),
+    ui.h('button', { 'aria-selected': 'false', text: 'Components', onclick: () => switchTab('components') }));
 
   screen.appendChild(ui.navbar({
     title: 'Library',
@@ -24,15 +25,24 @@ export default async function renderLibrary() {
   screen.appendChild(ui.h('div', { style: { paddingTop: '10px' } }, seg));
   screen.appendChild(body);
 
+  const TABS = ['captions', 'sections', 'components'];
   function switchTab(t) {
     tab = t;
-    [...seg.children].forEach((b, i) => b.setAttribute('aria-selected', String((i === 0) === (t === 'captions'))));
+    [...seg.children].forEach((b, i) => b.setAttribute('aria-selected', String(TABS[i] === t)));
     paint();
   }
 
   const save = async (patch) => { s = await saveSettings(patch); };
 
   async function addItem() {
+    if (tab === 'components') {
+      const t = await ui.prompt('New Component', 'Used by the defect-table report.', '', { okLabel: 'Add' });
+      if (t && t.trim()) {
+        await save({ componentLib: [...s.componentLib, t.trim().toUpperCase()] });
+        paint();
+      }
+      return;
+    }
     if (tab === 'sections') {
       const t = await ui.prompt('New Section Name', 'Used when adding sections to a project.', '', { okLabel: 'Add' });
       if (t && t.trim()) {
@@ -99,6 +109,30 @@ export default async function renderLibrary() {
     }
   }
 
+  async function componentMenu(index) {
+    const name = s.componentLib[index];
+    const choice = await ui.actionSheet(name, [
+      { label: 'Rename', value: 'ren', icon: 'pencil', color: 'var(--sys-blue)', primary: true },
+      { label: 'Move up', value: 'up', icon: 'up', color: 'var(--sys-gray)' },
+      { label: 'Move down', value: 'down', icon: 'down', color: 'var(--sys-gray)' },
+      { label: 'Delete', value: 'del', icon: 'trash', color: 'var(--sys-red)', destructive: true },
+    ]);
+    const lib = [...s.componentLib];
+    if (choice === 'ren') {
+      const t = await ui.prompt('Rename Component', '', name);
+      if (!t || !t.trim()) return;
+      lib[index] = t.trim().toUpperCase();
+    } else if (choice === 'up' && index > 0) {
+      [lib[index - 1], lib[index]] = [lib[index], lib[index - 1]];
+    } else if (choice === 'down' && index < lib.length - 1) {
+      [lib[index + 1], lib[index]] = [lib[index], lib[index + 1]];
+    } else if (choice === 'del') {
+      lib.splice(index, 1);
+    } else return;
+    await save({ componentLib: lib });
+    paint();
+  }
+
   async function sectionMenu(index) {
     const name = s.sectionLib[index];
     const choice = await ui.actionSheet(name, [
@@ -156,6 +190,19 @@ export default async function renderLibrary() {
             const extra = s.captionLib.filter((g) => !DEFAULT_CAPTIONS.some((d) => d.group === g.group));
             await save({ captionLib: [...merged, ...extra] });
             paint(); ui.toast('Library restored');
+          },
+        })));
+    } else if (tab === 'components') {
+      body.appendChild(ui.h('div', { class: 'hint',
+        text: 'The defect-table report groups each section\u2019s photos by component, and prints one table per group.' }));
+      body.appendChild(ui.group('Components',
+        s.componentLib.map((t, i) => ui.row({ title: t, chevron: true, onclick: () => componentMenu(i) }))));
+      body.appendChild(ui.h('div', { class: 'btn-stack' },
+        ui.h('button', {
+          class: 'btn tinted wide', text: 'Restore built-in components',
+          onclick: async () => {
+            await save({ componentLib: Array.from(new Set([...s.componentLib, ...DEFAULT_COMPONENTS])) });
+            paint(); ui.toast('Components restored');
           },
         })));
     } else {
