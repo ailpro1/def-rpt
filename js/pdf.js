@@ -46,7 +46,23 @@ export function measure(text, { font = 'regular', size = 9 } = {}) {
   return (units / 1000) * size / PT_PER_MM;
 }
 
-/** Break text to a width, honouring existing newlines. */
+/** Split a word that cannot fit on a line of its own, character by character. */
+function breakWord(word, widthMm, opts) {
+  const parts = [];
+  let part = '';
+  for (const ch of word) {
+    if (part && measure(part + ch, opts) > widthMm) { parts.push(part); part = ch; }
+    else part += ch;
+  }
+  if (part) parts.push(part);
+  return parts;
+}
+
+/**
+ * Break text to a width, honouring existing newlines. A word too long for the
+ * width is split rather than allowed to run past the edge — a table cell must
+ * never spill over its own border.
+ */
 export function wrap(text, widthMm, opts = {}) {
   const out = [];
   String(text).split('\n').forEach((para) => {
@@ -55,8 +71,12 @@ export function wrap(text, widthMm, opts = {}) {
     let line = '';
     for (const word of words) {
       const next = line ? `${line} ${word}` : word;
-      if (measure(next, opts) <= widthMm || !line) line = next;
-      else { out.push(line); line = word; }
+      if (measure(next, opts) <= widthMm) { line = next; continue; }
+      if (line) { out.push(line); line = ''; }
+      if (measure(word, opts) <= widthMm) { line = word; continue; }
+      const parts = breakWord(word, widthMm, opts);
+      out.push(...parts.slice(0, -1));
+      line = parts[parts.length - 1] || '';
     }
     out.push(line);
   });

@@ -474,6 +474,8 @@ export default async function renderSection(sectionId) {
     const choice = await ui.actionSheet(section.title, [
       { label: 'Rename section', value: 'ren', icon: 'pencil', color: 'var(--sys-gray)' },
       { label: 'Reorder photos', value: 'order', icon: 'move', color: 'var(--sys-teal)' },
+      { label: 'Set component for this section', value: 'comp', icon: 'list', color: 'var(--sys-teal)',
+        sub: 'Groups the photos under a heading in the report' },
       { label: 'Caption every uncaptioned photo', value: 'fill', icon: 'list', color: 'var(--sys-blue)' },
       { label: 'Share photos', value: 'share', icon: 'share', color: 'var(--sys-green)' },
     ]);
@@ -486,6 +488,18 @@ export default async function renderSection(sectionId) {
       }
     }
     if (choice === 'order') reorderSheet();
+    if (choice === 'comp') {
+      const choices = await componentChoices();
+      const picked = await ui.actionSheet(`Component for all ${photos.length} photo(s)`, [
+        ...choices.slice(0, 12).map((c) => ({ label: c, value: c, icon: 'list', color: 'var(--sys-teal)' })),
+        { label: 'Clear component', value: '__clear', icon: 'x', color: 'var(--sys-gray)' },
+      ]);
+      if (!picked) return;
+      const value = picked === '__clear' ? '' : picked;
+      for (const p of photos) await updatePhoto(p.id, { component: value });
+      ui.toast(value ? `All set to ${value}` : 'Component cleared');
+      paint();
+    }
     if (choice === 'fill') {
       const missing = photos.filter((p) => !p.caption);
       if (!missing.length) { ui.toast('All photos captioned'); return; }

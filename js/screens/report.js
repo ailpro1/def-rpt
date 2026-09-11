@@ -336,7 +336,12 @@ export default async function renderReport(projectId) {
             pg.appendChild(body2);
 
             if (c === chunks.length - 1) {
-              pg.appendChild(ui.h('table', { class: 'rt-info' }, ui.h('tbody', {},
+              pg.appendChild(ui.h('table', { class: 'rt-info' },
+                // Fixed columns, so a long defect list cannot reshape the table.
+                ui.h('colgroup', {},
+                  ui.h('col', { class: 'k' }), ui.h('col', { class: 'v' }),
+                  ui.h('col', { class: 'k2' }), ui.h('col', { class: 'v' })),
+                ui.h('tbody', {},
                 ui.h('tr', {},
                   ui.h('th', { text: 'LOCATION' }),
                   ui.h('td', { text: d.section.title }),

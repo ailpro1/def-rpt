@@ -170,7 +170,10 @@ FRONT                        <- section, once
 ```
 
 The table runs the full width of the page, left to right, above the footer. Its rules
-are drawn at 1pt rather than a hairline, which disappears at phone zoom.
+are drawn at 1pt rather than a hairline, which disappears at phone zoom. Columns are
+fixed, never sized to their contents, and text wraps inside them -- a word too long
+for its column is split rather than allowed to run past the border. Section and
+component headings wrap the same way.
 
 The DEFECT cell is written from the captions: runs of photos sharing a caption
 collapse to `(PIC 1-3) UNFILLED GROUT   (PIC 4) HOLLOW TILE`, numbered from 1 within
@@ -184,8 +187,9 @@ what you check is what you get.
 
 Condition rating is deliberately not included.
 
-Set a photo's component in its sheet, or several at once with **Set component** in
-select mode. Components come from Library -> Components. Photos with no component
+Set a component three ways: the whole section at once from its **...** menu, several
+photos from **Set component** in select mode, or one photo in its own sheet.
+Components come from Library -> Components. Photos with no component
 stay as one unnamed group, and its heading is dropped rather than repeating the
 section name.
 

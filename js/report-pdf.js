@@ -198,9 +198,10 @@ export async function buildReportPdf({ project, settings, data, opts }) {
 
           let y = gridTop;
           if (first) {
-            doc.text(d.section.title.toUpperCase(), L.side, y + T.sectionHeadSize * MM * 0.8,
-              { font: 'bold', size: T.sectionHeadSize });
-            y += lineH(T.sectionHeadSize) + 1.5;
+            // Wrapped, not a single line: a long section or component name would
+            // otherwise run off the right edge of the page.
+            y += doc.textBlock(d.section.title.toUpperCase(), L.side, y, contentW,
+              { font: 'bold', size: T.sectionHeadSize, lineHeight: 1.2, maxLines: 2 }) + 1.5;
             first = false;
           }
           // A single unnamed block would only repeat the section heading.
@@ -209,8 +210,8 @@ export async function buildReportPdf({ project, settings, data, opts }) {
             const label = b.component
               ? `${bi + 1}.0 ${d.section.title.toUpperCase()} (${b.component})`
               : `${bi + 1}.0 ${d.section.title.toUpperCase()}`;
-            doc.text(label, L.side, y + T.blockHeadSize * MM * 0.8, { font: 'bold', size: T.blockHeadSize });
-            y += lineH(T.blockHeadSize) + 2;
+            y += doc.textBlock(label, L.side, y, contentW,
+              { font: 'bold', size: T.blockHeadSize, lineHeight: 1.2, maxLines: 2 }) + 2;
           }
 
           for (let i = from; i < to; i++) {
@@ -255,7 +256,7 @@ export async function buildReportPdf({ project, settings, data, opts }) {
   // Components head their block here too; the band is reserved on every page so
   // photos stay the same size whether or not a heading is printed above them.
   const anyComponent = data.some((d) => d.photos.some((p) => p.component));
-  const headBand = anyComponent ? lineH(T.blockHeadSize) + 2 : 0;
+  const headBand = anyComponent ? lineH(T.blockHeadSize) * 2 + 2 : 0;
   const gridStart = gridTop + headBand;
   const rowH = (gridBottom - gridStart - L.rowGap * (rows - 1)) / rows;
   const capLine = L.capSize * MM * 1.28;
@@ -282,8 +283,8 @@ export async function buildReportPdf({ project, settings, data, opts }) {
         const label = b.component
           ? `${chunks[c].bi + 1}.0 ${d.section.title.toUpperCase()} (${b.component})`
           : `${chunks[c].bi + 1}.0 ${d.section.title.toUpperCase()}`;
-        doc.text(label, L.side, gridTop + T.blockHeadSize * MM * 0.8,
-          { font: 'bold', size: T.blockHeadSize });
+        doc.textBlock(label, L.side, gridTop, contentW,
+          { font: 'bold', size: T.blockHeadSize, lineHeight: 1.2, maxLines: 2 });
       }
 
       for (let i = 0; i < chunks[c].photos.length; i++) {
@@ -411,8 +412,9 @@ export function planTableFormat(data, perPage) {
  */
 function paginateBlock(count, perPage, tableH) {
   const cols = 2;
-  // Allow for the section and block headings that sit above the photos.
-  const headRoom = lineH(T.sectionHeadSize) + lineH(T.blockHeadSize) + 4;
+  // Allow for the section and block headings above the photos, either of which
+  // can wrap to a second line.
+  const headRoom = lineH(T.sectionHeadSize) * 2 + lineH(T.blockHeadSize) * 2 + 4;
   const fullRows = Math.max(1, Math.floor((gridBottom - gridTop - headRoom) / photoRowH));
   const perFull = Math.min(perPage, fullRows * cols);
   const lastRows = Math.max(0, Math.floor((gridBottom - gridTop - headRoom - tableH - 4) / photoRowH));
