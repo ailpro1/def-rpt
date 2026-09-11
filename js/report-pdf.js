@@ -203,7 +203,9 @@ export async function buildReportPdf({ project, settings, data, opts }) {
             y += lineH(T.sectionHeadSize) + 1.5;
             first = false;
           }
-          if (pi === 0) {
+          // A single unnamed block would only repeat the section heading.
+          const showBlockHead = b.component || blocks.length > 1;
+          if (pi === 0 && showBlockHead) {
             const label = b.component
               ? `${bi + 1}.0 ${d.section.title.toUpperCase()} (${b.component})`
               : `${bi + 1}.0 ${d.section.title.toUpperCase()}`;
@@ -353,7 +355,7 @@ function defectTable(doc, x, y, location, component, defect) {
   cell(cx, y, T_COLS[0], h1, 'LOCATION', true); cx += T_COLS[0];
   cell(cx, y, T_COLS[1], h1, location || '-'); cx += T_COLS[1];
   cell(cx, y, T_COLS[2], h1, 'COMPONENT', true); cx += T_COLS[2];
-  cell(cx, y, T_COLS[3], h1, component || '-');
+  cell(cx, y, T_COLS[3], h1, component || '');
 
   cell(x, y + h1, T_COLS[0], h2, 'DEFECT', true);
   cell(x + T_COLS[0], y + h1, spanW, h2, defect || '-');

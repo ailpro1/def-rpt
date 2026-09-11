@@ -284,6 +284,15 @@ export const displayBlobId = (photo) => photo.flatBlobId || photo.blobId;
 /* ------------------------- defect-table grouping ------------------------- */
 
 /**
+ * Per-photo components are built and tested but switched off: they are the one
+ * thing in this format that needs extra input on site. With this false every
+ * section is a single block and the table's COMPONENT cell is left blank.
+ * Flip to true to bring back the photo-sheet field, the bulk action and the
+ * Library tab.
+ */
+export const COMPONENTS_ENABLED = false;
+
+/**
  * Split a section's photos into COMPONENT blocks for the defect-table format.
  * Photos keep their order; blocks appear in the order their component is first
  * seen. Photos with no component fall into one unnamed block.

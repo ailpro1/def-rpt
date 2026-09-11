@@ -307,7 +307,8 @@ export default async function renderReport(projectId) {
               body2.appendChild(ui.h('div', { class: 'rt-section', text: d.section.title.toUpperCase() }));
               first = false;
             }
-            if (c === 0) {
+            // A single unnamed block would only repeat the section heading.
+            if (c === 0 && (b.component || blocks.length > 1)) {
               body2.appendChild(ui.h('div', { class: 'rt-block',
                 text: b.component
                   ? `${bi + 1}.0 ${d.section.title.toUpperCase()} (${b.component})`
@@ -340,7 +341,7 @@ export default async function renderReport(projectId) {
                   ui.h('th', { text: 'LOCATION' }),
                   ui.h('td', { text: d.section.title }),
                   ui.h('th', { text: 'COMPONENT' }),
-                  ui.h('td', { text: b.component || '-' })),
+                  ui.h('td', { text: b.component || '' })),
                 ui.h('tr', {},
                   ui.h('th', { text: 'DEFECT' }),
                   ui.h('td', { colspan: '3', text: defect || '-' })))));

@@ -149,38 +149,39 @@ Report Options -> Format.
 
 ### Defect table format
 
-Each section's photos are grouped by their **component** (WALL FINISHES, STEEL GATE,
-FLOOR FINISHES ...), and each group prints as:
+One block per section, closing with the table:
 
 ```
-FRONT                           <- section, once
-1.0 FRONT (WALL FINISHES)       <- group
+FRONT                           <- section
 
  1 [photo]        2 [photo]
  3 [photo]        4 [photo]
 
                   +----------+--------+-----------+----------+
-                  | LOCATION | FRONT  | COMPONENT | WALL FIN |
+                  | LOCATION | FRONT  | COMPONENT |          |
                   +----------+--------+-----------+----------+
-                  | DEFECT   | (PIC 1-3) UNEVEN PLASTER ...  |
+                  | DEFECT   | (PIC 1-2) RUSTY GATE ...      |
                   +----------+-------------------------------+
 ```
 
 The DEFECT cell is written from the captions: runs of photos sharing a caption
 collapse to `(PIC 1-3) UNFILLED GROUT   (PIC 4) HOLLOW TILE`, numbered from 1 within
-the group. Photo numbers replace the per-photo captions, exactly as the table refers
-to them.
+the section. Photo numbers replace the per-photo captions, exactly as the table refers
+to them. Nothing extra is captured on site — the existing captions drive it.
 
-The table is pinned to the bottom of the group's last page. Its height is measured
+The table is pinned to the bottom of the section's last page. Its height is measured
 first, and the page fit is reduced when a long defect list needs the room -- so the
 table never lands on top of a photo. The preview and the PDF share that planner, so
 what you check is what you get.
 
-Set a photo's component in its sheet, or several at once from **Set component** in
-select mode. Components come from Library -> Components; photos with no component
-stay as one unnamed group per section.
-
 Condition rating is deliberately not included.
+
+**COMPONENT is switched off.** The column prints, but empty. Splitting a section into
+components is the only part of this format that would need extra input on site, so it
+is built and tested but disabled behind `COMPONENTS_ENABLED` in `js/store.js`. Setting
+it to `true` restores the field in the photo sheet, the bulk **Set component** action
+and the Library tab; sections then split into numbered blocks
+(`1.0 FRONT (WALL FINISHES)`), each with its own table.
 
 ## Report layout
 
