@@ -1,7 +1,7 @@
 // Domain layer: projects, sections, photos, settings.
 import * as db from './db.js';
 import { BUILD } from './build.js';
-import { DEFAULT_CAPTIONS, DEFAULT_SECTIONS, DEFAULT_COMPONENTS } from './captions.js';
+import { DEFAULT_CAPTIONS, DEFAULT_SECTIONS, DEFAULT_COMPONENTS, LIB_SEED_VERSION } from './captions.js';
 
 export const SETTINGS_ID = 'app';
 
@@ -42,6 +42,7 @@ export const DEFAULT_SETTINGS = {
   sectionLib: DEFAULT_SECTIONS,
   componentLib: DEFAULT_COMPONENTS,
   usage: {},              // caption text -> {n,last,sections{}}
+  libSeedVersion: LIB_SEED_VERSION,
   ai: { key: '', model: 'gemini-2.5-flash', enabled: false, auto: true, available: [], checkedAt: null },
   lastBackupAt: null,
 };
@@ -53,7 +54,47 @@ export async function getSettings(force = false) {
   const s = await db.get(db.STORES.settings, SETTINGS_ID);
   _settings = s ? { ...DEFAULT_SETTINGS, ...s, ai: { ...DEFAULT_SETTINGS.ai, ...(s.ai || {}) } }
                 : { ...DEFAULT_SETTINGS };
+  if (s && (_settings.libSeedVersion || 0) < LIB_SEED_VERSION) await mergeSeedLibraries();
   return _settings;
+}
+
+/**
+ * A stored library is the user's own — we never overwrite it. When the shipped
+ * seeds grow, append only the entries the user does not already have, keeping
+ * their edits, their order and anything they removed on purpose is re-added
+ * only once (libSeedVersion guards the repeat).
+ */
+async function mergeSeedLibraries() {
+  const cur = _settings;
+  // Stamp first: saveSettings() re-enters getSettings(), which would otherwise
+  // see the old version and recurse.
+  _settings = { ...cur, libSeedVersion: LIB_SEED_VERSION };
+  const seen = new Set();
+  const lib = (cur.captionLib || []).map((g) => ({ ...g, items: [...g.items] }));
+  lib.forEach((g) => g.items.forEach((i) => seen.add(i.trim().toUpperCase())));
+  let added = 0;
+  DEFAULT_CAPTIONS.forEach((sg) => {
+    const fresh = sg.items.filter((i) => !seen.has(i.trim().toUpperCase()));
+    if (!fresh.length) return;
+    fresh.forEach((i) => seen.add(i.trim().toUpperCase()));
+    added += fresh.length;
+    const g = lib.find((x) => x.group === sg.group);
+    if (g) g.items.push(...fresh);
+    else lib.push({ group: sg.group, items: fresh });
+  });
+  const mergeFlat = (stored, seeds) => {
+    const have = new Set((stored || []).map((x) => x.trim().toUpperCase()));
+    const fresh = seeds.filter((x) => !have.has(x.trim().toUpperCase()));
+    return fresh.length ? [...(stored || []), ...fresh] : (stored || []);
+  };
+  const sectionLib = mergeFlat(cur.sectionLib, DEFAULT_SECTIONS);
+  const componentLib = mergeFlat(cur.componentLib, DEFAULT_COMPONENTS);
+  await saveSettings({
+    captionLib: added ? lib : cur.captionLib,
+    sectionLib,
+    componentLib,
+    libSeedVersion: LIB_SEED_VERSION,
+  });
 }
 
 export async function saveSettings(patch) {
