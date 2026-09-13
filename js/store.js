@@ -54,7 +54,10 @@ export async function getSettings(force = false) {
   const s = await db.get(db.STORES.settings, SETTINGS_ID);
   _settings = s ? { ...DEFAULT_SETTINGS, ...s, ai: { ...DEFAULT_SETTINGS.ai, ...(s.ai || {}) } }
                 : { ...DEFAULT_SETTINGS };
-  if (s && (_settings.libSeedVersion || 0) < LIB_SEED_VERSION) await mergeSeedLibraries();
+  // Read the version off the STORED row, not off the merge: DEFAULT_SETTINGS
+  // supplies libSeedVersion, so an old row that lacks the key would otherwise
+  // look current and never migrate.
+  if (s && (s.libSeedVersion || 0) < LIB_SEED_VERSION) await mergeSeedLibraries();
   return _settings;
 }
 
