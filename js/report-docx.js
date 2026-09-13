@@ -129,7 +129,9 @@ export async function buildReportDocx({ project, settings, data, opts }) {
     return { rel: imageRel(images.length - 1), id: images.length, w, h };
   };
 
-  const footLeft = settings.footerText || project.address || '';
+  // Footer left is whatever the user typed, nothing more: the address is
+  // already in the header's Title, and once a page is enough.
+  const footLeft = settings.footerText || '';
   const sections = [];
   const tableFormat = opts.format === 'table';
 

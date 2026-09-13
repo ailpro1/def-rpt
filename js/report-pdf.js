@@ -66,7 +66,9 @@ export async function buildReportPdf({ project, settings, data, opts }) {
     author: settings.company || settings.preparedBy || '',
     subject: project.address || '',
   });
-  const footLeft = settings.footerText || project.address || '';
+  // Footer left is whatever the user typed, nothing more: the address is
+  // already in the header's Title, and once a page is enough.
+  const footLeft = settings.footerText || '';
   const perSection = opts.numbering === 'section';
 
   // Page counts are worked out before anything is drawn, so a footer can say

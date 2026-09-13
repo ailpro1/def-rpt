@@ -233,7 +233,9 @@ export default async function renderReport(projectId) {
     }
 
     // Address is no longer in the header, so it rides in the footer instead.
-    const footerLeft = settings.footerText || project.address || '';
+    // Footer left is whatever the user typed, nothing more: the address is
+    // already in the header's Title, and once a page is enough.
+    const footerLeft = settings.footerText || '';
     const perSection = opts.numbering === 'section';
     const tablePlan = opts.format === 'table' ? planTableFormat(data, opts.perPage) : null;
     const sectionPages = tablePlan

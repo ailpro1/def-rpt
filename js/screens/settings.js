@@ -245,7 +245,8 @@ export default async function renderSettings() {
           return o;
         })),
       }),
-      ui.inputRow('Page footer', s.footerText, (v) => set({ footerText: v }), { placeholder: 'Left side of the page footer' }),
+      ui.inputRow('Page footer', s.footerText, (v) => set({ footerText: v }),
+        { placeholder: 'Left of the footer \u2014 empty for page numbers only' }),
     ]));
 
     /* capture */
