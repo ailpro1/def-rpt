@@ -8,7 +8,9 @@ import {
 } from '../store.js';
 import { blobUrl } from '../image.js';
 import { draftSummary, aiReady, aiEnabled } from '../assist.js';
-import { buildReportPdf, reportFilename, planTableFormat, captionPageCount } from '../report-pdf.js';
+import {
+  buildReportPdf, reportFilename, planTableFormat, captionPageCount, captionLines, photoHeadBand,
+} from '../report-pdf.js';
 import { buildReportDocx } from '../report-docx.js';
 import { saveFile } from '../backup.js';
 
@@ -392,6 +394,7 @@ export default async function renderReport(projectId) {
     }
 
     /* photo pages — paginated per component block within each section */
+    const headBand = photoHeadBand(data.some((d) => d.photos.some((p) => p.component)));
     for (const d of data) {
       const blocks = componentBlocks(d.photos);
       const chunks = [];
@@ -416,6 +419,7 @@ export default async function renderReport(projectId) {
         const g = ui.h('div', { class: 'rgrid' });
         g.style.setProperty('--cols', String(cols()));
         g.style.setProperty('--rows', String(rows()));
+        g.style.setProperty('--cap-lines', String(captionLines(chunks[i].photos, opts.perPage, headBand)));
         for (const p of chunks[i].photos) g.appendChild(await photoCell(p));
         pg.appendChild(g);
         pageNo++;

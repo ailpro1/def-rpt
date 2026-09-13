@@ -250,18 +250,11 @@ export async function buildReportPdf({ project, settings, data, opts }) {
   }
 
   /* ---------- photo pages: caption format ---------- */
-  const cols = opts.perPage <= 2 ? 1 : 2;
-  const rows = Math.ceil(opts.perPage / cols);
-  const colW = (contentW - L.colGap * (cols - 1)) / cols;
   // Components head their block here too; the band is reserved on every page so
   // photos stay the same size whether or not a heading is printed above them.
   const anyComponent = data.some((d) => d.photos.some((p) => p.component));
-  const headBand = anyComponent ? lineH(T.blockHeadSize) * 2 + 2 : 0;
-  const gridStart = gridTop + headBand;
-  const rowH = (gridBottom - gridStart - L.rowGap * (rows - 1)) / rows;
-  const capLine = L.capSize * MM * 1.28;
-  const capH = capLine * 2 + 1.4;
-  const imgH = rowH - capH;
+  const headBand = photoHeadBand(anyComponent);
+  const { cols, colW, rowH, gridStart } = gridMetrics(opts.perPage, headBand);
 
   for (const d of data) {
     const blocks = componentBlocks(d.photos);
@@ -277,6 +270,13 @@ export async function buildReportPdf({ project, settings, data, opts }) {
     for (let c = 0; c < chunks.length; c++) {
       nextPage();
       header(doc, project.name, d.section.title);
+
+      // The caption band is sized to the longest caption on THIS page, so a
+      // three-line note is printed in full instead of being cut at two. Every
+      // photo on the page still gets the same box.
+      const capLines = captionLines(chunks[c].photos, opts.perPage, headBand);
+      const capH = capLines ? CAP_LINE * capLines + CAP_GAP : 0;
+      const imgH = rowH - capH;
 
       const b = chunks[c].block;
       if (chunks[c].first && (b.component || blocks.length > 1)) {
@@ -305,8 +305,8 @@ export async function buildReportPdf({ project, settings, data, opts }) {
 
         const caption = [photo.caption, photo.caption2].filter(Boolean).join('\n');
         if (caption) {
-          doc.textBlock(caption.toUpperCase(), cx, cy + imgH + 1.4, colW,
-            { size: L.capSize, lineHeight: 1.28, maxLines: 2 });
+          doc.textBlock(caption.toUpperCase(), cx, cy + imgH + CAP_GAP, colW,
+            { size: L.capSize, lineHeight: 1.28, maxLines: capLines });
         }
       }
 
@@ -391,6 +391,44 @@ function defectTable(doc, x, y, location, component, defect) {
  * paginates identically to the PDF — the table's height decides how many photos
  * fit on a block's last page, and that is not something the preview can guess.
  */
+const CAP_LINE = L.capSize * MM * 1.28;   // one caption line
+const CAP_GAP = 1.4;                      // photo to caption
+
+/** Room a component heading takes above the grid, or 0 when none is printed. */
+export function photoHeadBand(anyComponent) {
+  return anyComponent ? lineH(T.blockHeadSize) * 2 + 2 : 0;
+}
+
+/** The caption-format grid, shared with the on-screen preview. */
+export function gridMetrics(perPage, headBand = 0) {
+  const cols = perPage <= 2 ? 1 : 2;
+  const rows = Math.ceil(perPage / cols);
+  const colW = (contentW - L.colGap * (cols - 1)) / cols;
+  const gridStart = gridTop + headBand;
+  const rowH = (gridBottom - gridStart - L.rowGap * (rows - 1)) / rows;
+  return { cols, rows, colW, rowH, gridStart };
+}
+
+/**
+ * Caption lines to allow on one page: the longest caption on it, so nothing is
+ * cut. Capped so the band cannot take more than 45% of the row — past that the
+ * photo, which is the point of the page, would be too small to read.
+ */
+export function captionLines(photos, perPage, headBand = 0) {
+  const { colW, rowH } = gridMetrics(perPage, headBand);
+  let n = 0;
+  for (const p of photos) {
+    const caption = [p.caption, p.caption2].filter(Boolean).join('\n');
+    if (!caption) continue;
+    n = Math.max(n, wrap(caption.toUpperCase(), colW, { size: L.capSize }).length);
+  }
+  if (!n) return 0;
+  // Two lines minimum, so a page of short captions looks exactly as it always
+  // has and photo size only changes where a caption actually needs the room.
+  const room = Math.max(2, Math.floor((rowH * 0.45 - CAP_GAP) / CAP_LINE));
+  return Math.min(Math.max(n, 2), room);
+}
+
 /** Pages a section needs in the caption format, now that blocks start a page. */
 export function captionPageCount(photos, perPage) {
   const blocks = componentBlocks(photos);

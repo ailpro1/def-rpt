@@ -45,6 +45,9 @@
 .ph-stamp.tr{right:1.2mm;top:1.2mm}
 .ph-stamp.tl{left:1.2mm;top:1.2mm}
 .rcell .cp{flex:none;margin-top:1.4mm;font-size:8.2pt;line-height:1.28;
+  /* The band holds exactly the lines the PDF reserves for this page, so the
+     preview and the exported file break in the same place. */
+  height:calc(var(--cap-lines,2) * 1.28 * 8.2pt);overflow:hidden;
   text-transform:uppercase;white-space:pre-line}
 .rcell .cp .sub{text-transform:none}
 
