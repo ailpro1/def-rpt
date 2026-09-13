@@ -23,6 +23,10 @@
 .rhead table{width:100%;border-collapse:collapse}
 .rhead td{vertical-align:top;padding:0 0 1mm}
 .rhead td.rh-k{font-weight:700;white-space:nowrap;padding:0 3mm 1mm 0;width:1%}
+.rh-row{display:flex;justify-content:space-between;align-items:baseline;gap:5mm;
+  padding-bottom:1mm;overflow:hidden}
+.rh-side{display:flex;gap:1.5mm;align-items:baseline;white-space:nowrap;min-width:0}
+.rh-side .rh-k{font-weight:700}
 .rh-v{font-weight:400}
 .rh-title{text-transform:uppercase}
 

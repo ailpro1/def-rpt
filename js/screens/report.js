@@ -10,6 +10,7 @@ import { blobUrl } from '../image.js';
 import { draftSummary, aiReady, aiEnabled } from '../assist.js';
 import {
   buildReportPdf, reportFilename, planTableFormat, captionPageCount, captionLines, photoHeadBand,
+  headerTitleFit,
 } from '../report-pdf.js';
 import { buildReportDocx } from '../report-docx.js';
 import { saveFile } from '../backup.js';
@@ -190,14 +191,18 @@ export default async function renderReport(projectId) {
 
   /* Title is the project, Group is the section this page belongs to. */
   function sectionHeader(groupText) {
-    const table = ui.h('table', {},
-      ui.h('tbody', {},
-        ui.h('tr', {},
-          ui.h('td', { class: 'rh-k', text: 'Title:' }),
-          ui.h('td', { class: 'rh-v rh-title', text: project.name }),
-          ui.h('td', { class: 'rh-k', style: { paddingLeft: '6mm' }, text: 'Group:' }),
-          ui.h('td', { class: 'rh-v rh-title', text: groupText }))));
-    return ui.h('div', { class: 'rhead' }, table);
+    // Group sits against the right margin and Title takes the rest, shrinking
+    // and clipping by the same rule the PDF uses rather than wrapping.
+    const fit = headerTitleFit(project.name, groupText);
+    const row = ui.h('div', { class: 'rh-row' },
+      ui.h('div', { class: 'rh-side' },
+        ui.h('span', { class: 'rh-k', text: 'Title:' }),
+        ui.h('span', { class: 'rh-v rh-title', text: fit.text,
+          style: { fontSize: `${fit.sizePt}pt` } })),
+      ui.h('div', { class: 'rh-side' },
+        ui.h('span', { class: 'rh-k', text: 'Group:' }),
+        ui.h('span', { class: 'rh-v rh-title', text: groupText })));
+    return ui.h('div', { class: 'rhead' }, row);
   }
 
   async function photoCell(p) {

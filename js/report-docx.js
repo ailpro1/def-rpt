@@ -3,7 +3,8 @@
 // grid, each page of photos is broken explicitly rather than left to Word, and
 // each section starts on a new page.
 import { buildDocx, para, run, image, table, pageOfPages, imageRel, mmToTwip } from './docx.js';
-import { wrap } from './pdf.js';
+import { wrap, measure } from './pdf.js';
+import { headerTitleFit } from './report-pdf.js';
 import { getBlob, displayBlobId, isOkCaption, photoTakenAt, componentBlocks, defectSummary } from './store.js';
 import { stampedCopy } from './image.js';
 import { formatStamp, fmtDate } from './ui.js';
@@ -60,11 +61,20 @@ const bytesOf = async (blobId) => {
 };
 
 function headerXml(project, sectionTitle) {
-  return table([20, 71, 22, 73], [[
+  // Group is only as wide as it needs to be, against the right margin, and
+  // Title keeps the rest — shrunk by the same rule as the PDF so a full address
+  // stays on one line instead of wrapping the header into the page body.
+  const group = (sectionTitle || '').toUpperCase();
+  const fit = headerTitleFit(project.name, group);
+  const groupLabelW = measure('Group:', { font: 'bold', size: HEAD_SIZE }) + 2;
+  const groupW = Math.min(CONTENT_W * 0.45, groupLabelW + measure(group, { size: HEAD_SIZE }) + 2);
+  const titleLabelW = measure('Title:', { font: 'bold', size: HEAD_SIZE }) + 2;
+  const titleW = CONTENT_W - titleLabelW - groupLabelW - groupW;
+  return table([titleLabelW, titleW, groupLabelW, groupW], [[
     { text: 'Title:', bold: true, size: HEAD_SIZE },
-    { text: (project.name || '').toUpperCase(), size: HEAD_SIZE },
+    { text: fit.text, size: fit.sizePt },
     { text: 'Group:', bold: true, size: HEAD_SIZE },
-    { text: (sectionTitle || '').toUpperCase(), size: HEAD_SIZE },
+    { text: group, size: HEAD_SIZE },
   ]], { cellPadMm: 0 })
     // A rule under the header, as in the printed layout.
     + `<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="12" w:space="1" w:color="000000"/></w:pBdr>`

@@ -34,16 +34,57 @@ const bytesOf = async (blobId) => {
 };
 
 function header(doc, titleValue, groupValue) {
-  const labelW = measure('Title:', { font: 'bold', size: L.headSize });
-  doc.text('Title:', L.side, headBaseline, { font: 'bold', size: L.headSize });
-  doc.text(titleValue.toUpperCase(), L.side + labelW + 2, headBaseline, { size: L.headSize });
+  const size = L.headSize;
+  const title = String(titleValue || '').toUpperCase();
+  const group = String(groupValue || '').toUpperCase();
+  const titleLabelW = measure('Title:', { font: 'bold', size });
+  const groupLabelW = measure('Group:', { font: 'bold', size });
 
-  const gx = L.side + contentW * 0.5;
-  const groupW = measure('Group:', { font: 'bold', size: L.headSize });
-  doc.text('Group:', gx, headBaseline, { font: 'bold', size: L.headSize });
-  doc.text(String(groupValue || '').toUpperCase(), gx + groupW + 2, headBaseline, { size: L.headSize });
+  // Group takes only the room it needs, hard against the right margin, and
+  // Title gets everything left of it. A title as long as a full address then
+  // has the whole line rather than half of it, and is shrunk and finally
+  // clipped instead of running under Group.
+  const gap = 5;
+  const groupW = groupLabelW + 2 + measure(group, { size });
+  const gx = Math.max(L.side + contentW * 0.5, PAGE.w - L.side - groupW);
+  const titleX = L.side + titleLabelW + 2;
+  const titleRoom = gx - gap - titleX;
+  const [titleText, titleSize] = fitText(title, titleRoom, size);
+
+  doc.text('Title:', L.side, headBaseline, { font: 'bold', size });
+  doc.text(titleText, titleX, headBaseline, { size: titleSize });
+  doc.text('Group:', gx, headBaseline, { font: 'bold', size });
+  doc.text(group, gx + groupLabelW + 2, headBaseline, { size });
 
   doc.line(L.side, headRule, PAGE.w - L.side, headRule, { width: L.rule });
+}
+
+/**
+ * How the preview must draw the header line, so it shrinks and clips exactly
+ * where the PDF does.
+ */
+export function headerTitleFit(titleValue, groupValue) {
+  const size = L.headSize;
+  const title = String(titleValue || '').toUpperCase();
+  const group = String(groupValue || '').toUpperCase();
+  const groupW = measure('Group:', { font: 'bold', size }) + 2 + measure(group, { size });
+  const gx = Math.max(L.side + contentW * 0.5, PAGE.w - L.side - groupW);
+  const titleX = L.side + measure('Title:', { font: 'bold', size }) + 2;
+  const [text, sizePt] = fitText(title, gx - 5 - titleX, size);
+  return { text, sizePt, labelSize: size };
+}
+
+/** Shrink to fit, down to a floor, then trim with an ellipsis. */
+function fitText(text, widthMm, size, floor = 7) {
+  if (!text || measure(text, { size }) <= widthMm) return [text, size];
+  let s = size;
+  while (s > floor) {
+    s = Math.round((s - 0.4) * 10) / 10;
+    if (measure(text, { size: s }) <= widthMm) return [text, s];
+  }
+  let out = text;
+  while (out.length > 1 && measure(out + '\u2026', { size: s }) > widthMm) out = out.slice(0, -1);
+  return [out + '\u2026', s];
 }
 
 function footer(doc, left, right) {
