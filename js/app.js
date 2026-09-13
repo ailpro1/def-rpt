@@ -1,5 +1,6 @@
 // Router + shell. Screens are plain modules that return a DOM node.
 import * as ui from './ui.js';
+import { BUILD } from './build.js';
 import { getSettings } from './store.js';
 import { revokeAll } from './image.js';
 
@@ -20,6 +21,14 @@ const ROUTES = [
   { re: /^#\/report\/([^/]+)$/, render: renderReport, tab: '#/projects', hideTabs: true },
   { re: /^#\/library$/, render: renderLibrary, tab: '#/library' },
   { re: /^#\/settings$/, render: renderSettings, tab: '#/settings' },
+  // Loaded on demand and only where it exists: the capture build ships without
+  // the intake modules entirely, so this route is not registered there.
+  ...(BUILD.intake ? [{
+    re: /^#\/inbox(?:\/([^/]+))?$/,
+    render: (code) => import('./screens/inbox.js').then((m) => m.default(code ? decodeURIComponent(code) : '')),
+    tab: '#/projects',
+    hideTabs: true,
+  }] : []),
 ];
 
 export function go(hash, replace = false) {

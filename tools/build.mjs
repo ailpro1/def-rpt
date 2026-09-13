@@ -23,6 +23,7 @@ const VARIANTS = [
       shortName: 'Insta Report',
       dbName: 'instareport',
       ai: true,
+      intake: true,
       fullBackup: true,
       defaultImageMaxPx: 1600,
     },
@@ -37,10 +38,11 @@ const VARIANTS = [
       shortName: 'IR Site',
       dbName: 'instareport-site',
       ai: false,
+      intake: false,
       fullBackup: false,
       defaultImageMaxPx: 1200,
     },
-    drop: ['js/ai.js', 'js/screens/assistant.js'],
+    drop: ['js/ai.js', 'js/screens/assistant.js', 'js/intake-net.js', 'js/screens/inbox.js'],
   },
 ];
 

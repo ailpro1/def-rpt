@@ -5,6 +5,7 @@ import { ingest, blobUrl } from '../image.js';
 import { exportBackup, importBackup, backupFilename, saveFile } from '../backup.js';
 import { BUILD } from '../build.js';
 import { ask, listModels, modelFor, DEFAULT_MODEL, aiEnabled } from '../assist.js';
+import { intakeEnabled, testConnection } from '../intake.js';
 
 export default async function renderSettings() {
   let s = await getSettings(true);
@@ -60,6 +61,48 @@ export default async function renderSettings() {
     ui.sheet({
       title, body: body2, rightLabel: 'Save',
       onRight: async () => { await set({ [key]: value }); paint(); ui.toast('Saved'); },
+    });
+  }
+
+  /**
+   * The bot's address is all this needs — the Telegram token and the Gemini key
+   * live on the Worker and never come near the phone.
+   */
+  async function intakeSheet() {
+    let url = s.intake.url || '';
+    const status = ui.h('div', { class: 'hint', text: '' });
+    const body2 = ui.h('div', {},
+      ui.group('Address', [
+        ui.inputRow('Worker URL', url, (v) => { url = v.trim(); },
+          { placeholder: 'https://your-worker.workers.dev' }),
+      ]),
+      status,
+      ui.h('div', { class: 'btn-stack' },
+        ui.h('button', {
+          class: 'btn tinted wide', text: 'Test connection',
+          onclick: async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true; btn.textContent = 'Testing\u2026';
+            try {
+              await set({ intake: { ...s.intake, url } });
+              await testConnection(url);
+              status.textContent = 'Connected. The bot is answering.';
+            } catch (err) {
+              status.textContent = err.message;
+            } finally {
+              btn.disabled = false; btn.textContent = 'Test connection';
+            }
+          },
+        })),
+      ui.h('div', { class: 'group-note',
+        text: 'Setting it up is written out in worker/README.md. Photos are collected by the bot, '
+          + 'then pulled into a project from Projects > + > Import from Telegram.' }),
+    );
+    ui.sheet({
+      title: 'Telegram intake',
+      body: body2,
+      rightLabel: 'Save',
+      onRight: async () => { await set({ intake: { ...s.intake, url } }); paint(); ui.toast('Saved'); },
     });
   }
 
@@ -330,6 +373,17 @@ export default async function renderSettings() {
         value: s.ai.enabled && s.ai.key ? 'On' : 'Off',
         iconName: 'sparkle', iconColor: 'var(--sys-indigo)',
         chevron: true, onclick: aiSheet,
+      }),
+    ]));
+
+    /* Telegram intake */
+    if (intakeEnabled) body.appendChild(ui.group('Telegram Intake', [
+      ui.row({
+        title: 'Intake bot',
+        sub: s.intake.url || 'Not set up',
+        value: s.intake.url ? 'On' : 'Off',
+        iconName: 'down', iconColor: 'var(--sys-blue)',
+        chevron: true, onclick: intakeSheet,
       }),
     ]));
 

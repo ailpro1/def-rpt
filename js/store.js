@@ -44,6 +44,8 @@ export const DEFAULT_SETTINGS = {
   usage: {},              // caption text -> {n,last,sections{}}
   libSeedVersion: LIB_SEED_VERSION,
   ai: { key: '', model: 'gemini-2.5-flash', enabled: false, auto: true, available: [], checkedAt: null },
+  // Telegram intake: the Worker's address and the last code used.
+  intake: { url: '', lastCode: '' },
   lastBackupAt: null,
 };
 
@@ -52,8 +54,14 @@ let _settings = null;
 export async function getSettings(force = false) {
   if (_settings && !force) return _settings;
   const s = await db.get(db.STORES.settings, SETTINGS_ID);
-  _settings = s ? { ...DEFAULT_SETTINGS, ...s, ai: { ...DEFAULT_SETTINGS.ai, ...(s.ai || {}) } }
-                : { ...DEFAULT_SETTINGS };
+  _settings = s
+    ? {
+      ...DEFAULT_SETTINGS,
+      ...s,
+      ai: { ...DEFAULT_SETTINGS.ai, ...(s.ai || {}) },
+      intake: { ...DEFAULT_SETTINGS.intake, ...(s.intake || {}) },
+    }
+    : { ...DEFAULT_SETTINGS };
   // Read the version off the STORED row, not off the merge: DEFAULT_SETTINGS
   // supplies libSeedVersion, so an old row that lacks the key would otherwise
   // look current and never migrate.
@@ -430,7 +438,9 @@ export async function timeAnomalies(projectId, { toleranceDays = 2 } = {}) {
   const noSource = [];
   const deltas = [];
   photos.forEach((p) => {
-    if (p.takenSource === 'now' || !photoTakenAt(p)) { noSource.push(p); return; }
+    // 'telegram' is a send time, not a capture time — Telegram strips EXIF from
+    // a compressed photo — so it belongs with the ones worth retiming.
+    if (p.takenSource === 'now' || p.takenSource === 'telegram' || !photoTakenAt(p)) { noSource.push(p); return; }
     if (base === null) return;
     const delta = photoTakenAt(p) - base;
     if (Math.abs(delta) > window) { offDate.push(p); deltas.push(delta); }

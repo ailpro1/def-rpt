@@ -36,8 +36,12 @@ jobs:
         run: |
           test ! -f dist/site/js/ai.js
           test ! -f dist/site/js/screens/assistant.js
+          test ! -f dist/site/js/intake-net.js
+          test ! -f dist/site/js/screens/inbox.js
           ! grep -rq "generativelanguage" dist/site/
+          ! grep -rq "api.telegram.org" dist/site/
           grep -q '"ai": false' dist/site/js/build.js
+          grep -q '"intake": false' dist/site/js/build.js
           echo "capture build is clean"
       - uses: actions/upload-pages-artifact@v3
         with:

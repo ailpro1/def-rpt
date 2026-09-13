@@ -250,7 +250,7 @@ export default async function renderProject(id) {
       if (clock.noSource.length) {
         rows.push(ui.row({
           title: `${clock.noSource.length} photo${clock.noSource.length === 1 ? '' : 's'} with no capture time`,
-          sub: 'Stamped with the import time — check before reporting',
+          sub: 'Stamped with the import or send time \u2014 check before reporting',
           iconName: 'x', iconColor: 'var(--sys-gray)',
           chevron: true,
           onclick: () => clockSheet(clock),

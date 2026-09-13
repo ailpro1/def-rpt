@@ -11,6 +11,7 @@ export const BUILD = {
   // from the same origin, and IndexedDB is per-origin, not per-path.
   dbName: 'instareport',
   ai: true,
+  intake: true,
   fullBackup: true,
   defaultImageMaxPx: 1600,
 };

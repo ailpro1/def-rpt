@@ -1,6 +1,7 @@
 import * as ui from '../ui.js';
 import { go } from '../app.js';
 import { listProjects, createProject, deleteProject, duplicateProject, projectStats, getSettings } from '../store.js';
+import { intakeEnabled, openInbox } from '../intake.js';
 
 export default async function renderProjects() {
   const screen = ui.h('div', { class: 'screen' });
@@ -15,11 +16,22 @@ export default async function renderProjects() {
   screen.appendChild(ui.navbar({
     title: 'Projects',
     largeTitle: true,
-    right: ui.navBtn('', newProject, { icon: 'plus' }),
+    right: ui.navBtn('', addSheet, { icon: 'plus' }),
     search,
   }));
   screen.appendChild(body);
-  screen.appendChild(ui.h('button', { class: 'fab', onclick: newProject, 'aria-label': 'New project' }, ui.icon('plus', 28)));
+  screen.appendChild(ui.h('button', { class: 'fab', onclick: addSheet, 'aria-label': 'New project' }, ui.icon('plus', 28)));
+
+  /** Straight to the form unless there is more than one way to start a project. */
+  async function addSheet() {
+    if (!intakeEnabled) return newProject();
+    const choice = await ui.actionSheet('Add', [
+      { label: 'New project', value: 'new', icon: 'plus', color: 'var(--sys-blue)', primary: true },
+      { label: 'Import from Telegram', value: 'tg', icon: 'down', color: 'var(--sys-indigo)' },
+    ]);
+    if (choice === 'new') newProject();
+    if (choice === 'tg') openInbox();
+  }
 
   async function newProject() {
     const s = await getSettings();

@@ -44,7 +44,12 @@ export async function exportBackup(projectIds = null, { onProgress } = {}) {
 
   const payload = {
     format: FORMAT, version: VERSION, exportedAt: new Date().toISOString(),
-    settings: projectIds ? null : { ...settings, ai: { ...settings.ai, key: '' } }, // never export the API key
+    // Never export the API key; keep the intake address but not a one-shot code.
+    settings: projectIds ? null : {
+      ...settings,
+      ai: { ...settings.ai, key: '' },
+      intake: { ...(settings.intake || {}), lastCode: '' },
+    },
     projects, sections, photos, blobs,
   };
   return new Blob([JSON.stringify(payload)], { type: 'application/json' });
