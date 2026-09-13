@@ -23,6 +23,7 @@ const footRule = PAGE.h - L.bottom - 4.5;
 const footBaseline = footRule + 1.5 + L.footSize * MM * 0.8;
 const gridBottom = footRule - 4;
 
+const STAMP_SHADE = 0.22;   // timestamp plate opacity; mirrored in css/report.css and js/image.js
 const GREY = [51, 51, 51];
 const RULE_GREY = [153, 153, 153];
 
@@ -482,8 +483,14 @@ function stamp(doc, text, x, y, w, h, position) {
   const boxH = size * MM + padY * 2;
   const bx = position.endsWith('l') ? x + 1.2 : x + w - 1.2 - boxW;
   const by = position.startsWith('t') ? y + 1.2 : y + h - 1.2 - boxH;
-  doc.rect(bx, by, boxW, boxH, { fill: [0, 0, 0] });
-  doc.text(text, bx + padX, by + padY + size * MM * 0.78, { font: 'mono', size, color: [255, 255, 255] });
+  // Barely-there plate. The white text is the timestamp; the plate only stops
+  // it disappearing on a pale wall, so it stays close to clear and a dark ghost
+  // a hair behind the text does the rest of the work.
+  doc.rect(bx, by, boxW, boxH, { fill: [0, 0, 0], opacity: STAMP_SHADE });
+  const tx = bx + padX;
+  const ty = by + padY + size * MM * 0.78;
+  doc.text(text, tx + 0.12, ty + 0.12, { font: 'mono', size, color: [0, 0, 0] });
+  doc.text(text, tx, ty, { font: 'mono', size, color: [255, 255, 255] });
 }
 
 /** Diagonal DRAFT marking, for anything not being issued. */

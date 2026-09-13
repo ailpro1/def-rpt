@@ -274,11 +274,11 @@ export function drawStamp(ctx, text, w, h, position = 'br') {
   const top = position.startsWith('t');
   const x = left ? pad * 2 : w - pad * 2 - tw;
   const y = top ? pad * 2 + size : h - pad * 2;
-  ctx.fillStyle = 'rgba(0,0,0,.42)';
+  ctx.fillStyle = 'rgba(0,0,0,.22)';   // matches the report's plate
   ctx.fillRect(x - pad, y - size, tw + pad * 2, size + pad * 1.4);
   ctx.fillStyle = '#ffffff';
-  ctx.shadowColor = 'rgba(0,0,0,.7)';
-  ctx.shadowBlur = size * 0.25;
+  ctx.shadowColor = 'rgba(0,0,0,.85)';
+  ctx.shadowBlur = size * 0.35;
   ctx.fillText(text, x, y);
   ctx.restore();
 }

@@ -37,7 +37,8 @@
 
 /* camera-style capture time */
 .ph-stamp{position:absolute;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
-  font-size:5.6pt;line-height:1;color:#fff;background:rgba(0,0,0,.45);
+  font-size:5.6pt;line-height:1;color:#fff;background:rgba(0,0,0,.22);
+  text-shadow:0 0 1px rgba(0,0,0,.9),0 0 2px rgba(0,0,0,.55);
   padding:.7mm 1mm;letter-spacing:.02em;white-space:nowrap;
   -webkit-print-color-adjust:exact;print-color-adjust:exact}
 .ph-stamp.br{right:1.2mm;bottom:1.2mm}

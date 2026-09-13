@@ -152,9 +152,16 @@ export function createPdf({ width = A4.w, height = A4.h, title = '', author = ''
     },
 
     /** Filled and/or stroked rectangle. x,y = top-left, in mm. */
-    rect(x, y, w, h, { fill, stroke, lineWidth = 0.2 } = {}) {
+    rect(x, y, w, h, { fill, stroke, lineWidth = 0.2, opacity = 1 } = {}) {
       const ops = cur.ops;
       ops.push('q');
+      if (opacity < 1) {
+        // Transparency lives in an ExtGState; name it by its value so the same
+        // alpha is only declared once per page.
+        const res = 'GS' + Math.round(opacity * 100);
+        cur.uses.add(res);
+        ops.push(`/${res} gs`);
+      }
       if (fill) ops.push(`${rgb(fill)} rg`);
       if (stroke) ops.push(`${rgb(stroke)} RG ${num(toPt(lineWidth))} w`);
       ops.push(`${num(toPt(x))} ${num(yPt(y + h))} ${num(toPt(w))} ${num(toPt(h))} re`);
@@ -288,8 +295,16 @@ export function createPdf({ width = A4.w, height = A4.h, title = '', author = ''
         .map(([res, id]) => `/${res} ${id} 0 R`).join(' ');
       const usedImages = [...pg.uses].filter((r) => r.startsWith('Im'))
         .map((r) => `/${r} ${firstImage + Number(r.slice(2))} 0 R`).join(' ');
+      // Inline ExtGState dictionaries — no indirect object needed for a value
+      // this small.
+      const usedAlpha = [...pg.uses].filter((r) => /^GS\d+$/.test(r))
+        .map((r) => {
+          const a = num(Number(r.slice(2)) / 100);
+          return `/${r} << /Type /ExtGState /ca ${a} /CA ${a} >>`;
+        }).join(' ');
       obj(pageIds[i], `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${num(width * PT_PER_MM)} ${num(height * PT_PER_MM)}] `
-        + `/Resources << /Font << ${usedFonts} >> /XObject << ${usedImages} >> >> /Contents ${contentIds[i]} 0 R >>`);
+        + `/Resources << /Font << ${usedFonts} >> /XObject << ${usedImages} >> `
+        + `/ExtGState << ${usedAlpha} >> >> /Contents ${contentIds[i]} 0 R >>`);
       offsets[contentIds[i]] = length;
       push(`${contentIds[i]} 0 obj\n<< /Length ${latin1(content).byteLength} >>\nstream\n`);
       push(content);
