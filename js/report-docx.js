@@ -1,8 +1,9 @@
 // The report as an editable Word document, laid out from the same data as the
-// PDF so both formats read the same. Word owns the pagination here — that is the
-// point of handing over a .docx — so photos are sized to fit six to a page and
+// PDF so both formats read the same: the photos-per-page setting decides the
+// grid, each page of photos is broken explicitly rather than left to Word, and
 // each section starts on a new page.
 import { buildDocx, para, run, image, table, pageOfPages, imageRel, mmToTwip } from './docx.js';
+import { wrap } from './pdf.js';
 import { getBlob, displayBlobId, isOkCaption, photoTakenAt, componentBlocks, defectSummary } from './store.js';
 import { stampedCopy } from './image.js';
 import { formatStamp, fmtDate } from './ui.js';
@@ -18,6 +19,40 @@ const BLOCK_SIZE = 11;
 const TABLE_SIZE = 8;
 const T_COLS = [24, 66, 30, 66];
 const NUM_COL = 8;
+
+const PT_MM = 25.4 / 72;
+const CELL_PAD = 1;            // table cell padding, mm
+const GRID_GAP = 4;            // between columns, mm
+// Word needs a little room to spare or it moves the last row to a page of its
+// own; 6mm is about one line of body text.
+const PAGE_SLACK = 6;
+const BODY_H = PAGE.heightMm - PAGE.marginMm.top - PAGE.marginMm.bottom;
+const capLineH = CAP_SIZE * PT_MM * 1.28;
+
+/** Same split as the PDF: one column up to two photos a page, two after that. */
+function gridOf(perPage) {
+  const cols = perPage <= 2 ? 1 : 2;
+  const rows = Math.ceil(perPage / cols);
+  const colW = (CONTENT_W - GRID_GAP * (cols - 1)) / cols;
+  return { cols, rows, colW, photoW: colW - CELL_PAD * 2 };
+}
+
+/**
+ * Caption lines to reserve on a page — the longest caption on it, so nothing is
+ * cut, floored at two and capped so the photo keeps most of the cell. Mirrors
+ * captionLines() in report-pdf.js.
+ */
+function capLinesFor(photos, photoW, rowH) {
+  let n = 0;
+  for (const p of photos) {
+    const text = [p.caption, p.caption2].filter(Boolean).join('\n');
+    if (!text) continue;
+    n = Math.max(n, wrap(text.toUpperCase(), photoW, { size: CAP_SIZE }).length);
+  }
+  if (!n) return 0;
+  const room = Math.max(2, Math.floor((rowH * 0.45) / capLineH));
+  return Math.min(Math.max(n, 2), room);
+}
 
 const bytesOf = async (blobId) => {
   const blob = await getBlob(blobId);
@@ -47,9 +82,25 @@ function footerXml(left) {
 }
 
 /** A photo cell: the image, then either its caption or nothing. */
-function photoCellXml(relId, id, widthMm, heightMm, captionText) {
-  return para(image(relId, id, widthMm, heightMm), { spaceAfter: captionText ? 0.6 : 0 })
+function photoCellXml(ref, widthMm, heightMm, captionText) {
+  const crop = coverCrop(ref, widthMm, heightMm);
+  return para(image(ref.rel, ref.id, widthMm, heightMm, 'photo', crop),
+    { spaceAfter: captionText ? 0.6 : 0 })
     + (captionText ? para(run(captionText.toUpperCase(), { size: CAP_SIZE }), { spaceAfter: 0 }) : '');
+}
+
+/** Even trim off the long side, so the photo fills the box at its own shape. */
+function coverCrop(ref, widthMm, heightMm) {
+  if (!ref.w || !ref.h) return null;
+  const box = widthMm / heightMm;
+  const img = ref.w / ref.h;
+  if (Math.abs(box - img) < 0.01) return null;
+  if (img > box) {
+    const take = (1 - box / img) / 2;     // too wide: trim left and right
+    return { l: take, r: take, t: 0, b: 0 };
+  }
+  const take = (1 - img / box) / 2;       // too tall: trim top and bottom
+  return { l: 0, r: 0, t: take, b: take };
 }
 
 /**
@@ -67,21 +118,35 @@ export async function buildReportDocx({ project, settings, data, opts }) {
       const text = formatStamp(photoTakenAt(photo), settings.stampFormat);
       if (text) blob = await stampedCopy(blob, text, { position: settings.stampPosition || 'br' });
     }
+    // The natural size decides the crop that makes it fill its box unstretched.
+    let w = 0, h = 0;
+    try {
+      const bmp = await createImageBitmap(blob);
+      w = bmp.width; h = bmp.height;
+      if (bmp.close) bmp.close();
+    } catch { /* fall back to an uncropped, stretched fit */ }
     images.push({ bytes: new Uint8Array(await blob.arrayBuffer()) });
-    return { rel: imageRel(images.length - 1), id: images.length };
+    return { rel: imageRel(images.length - 1), id: images.length, w, h };
   };
 
   const footLeft = settings.footerText || project.address || '';
   const sections = [];
   const tableFormat = opts.format === 'table';
 
-  // Photo geometry, matching the PDF's six-to-a-page.
-  const cols = opts.perPage <= 2 ? 1 : 2;
-  const gap = 4;
-  const capW = (CONTENT_W - gap * (cols - 1)) / cols;
-  const capH = capW / (4 / 3);
-  const tblW = (CONTENT_W - (NUM_COL + gap) * cols + gap) / cols;
+  // Photo geometry, from the photos-per-page setting rather than a fixed six.
+  const { cols, rows: gridRows, photoW: capW } = gridOf(opts.perPage);
+  const tblW = (CONTENT_W - (NUM_COL + GRID_GAP) * cols + GRID_GAP) / cols - CELL_PAD * 2;
   const tblH = tblW / (4 / 3);
+  // The section title sits on the first page of a section and the block heading
+  // above each block; both bands are reserved on every page so photos are the
+  // same size throughout.
+  const titleBand = SECTION_SIZE * PT_MM * 1.2 + 1.5;
+  const anyBlockHead = data.some((d) => {
+    const bs = componentBlocks(d.photos);
+    return bs.length > 1 || bs.some((b) => b.component);
+  });
+  const blockBand = anyBlockHead ? BLOCK_SIZE * PT_MM * 1.2 + 2 : 0;
+  const rowH = (BODY_H - titleBand - blockBand - PAGE_SLACK) / gridRows;
 
   /* ---------- cover ---------- */
   if (opts.cover) {
@@ -162,43 +227,73 @@ export async function buildReportDocx({ project, settings, data, opts }) {
     const body = [];
     body.push(para(run(d.section.title.toUpperCase(), { bold: true, size: SECTION_SIZE }), { spaceAfter: 1.5 }));
 
+    let printed = 0;
     for (let bi = 0; bi < blocks.length; bi++) {
       const b = blocks[bi];
-      if (b.component || blocks.length > 1) {
-        const label = b.component
-          ? `${bi + 1}.0 ${d.section.title.toUpperCase()} (${b.component})`
-          : `${bi + 1}.0 ${d.section.title.toUpperCase()}`;
-        body.push(para(run(label, { bold: true, size: BLOCK_SIZE }), { spaceAfter: 2, keepNext: true }));
-      }
+      const label = b.component
+        ? `${bi + 1}.0 ${d.section.title.toUpperCase()} (${b.component})`
+        : `${bi + 1}.0 ${d.section.title.toUpperCase()}`;
+      const headed = b.component || blocks.length > 1;
 
-      // Photos laid out as a borderless grid so Word keeps them in step.
-      const rows = [];
-      for (let i = 0; i < b.photos.length; i += cols) {
-        const cells = [];
-        for (let c = 0; c < cols; c++) {
-          const photo = b.photos[i + c];
-          if (!photo) {
-            if (tableFormat) cells.push({ text: '' });
-            cells.push({ text: '' });
-            continue;
-          }
-          const ref = await addImage(photo);
-          if (tableFormat) {
-            // The number stands in for a caption; the table below refers to it.
-            cells.push({ xml: para(run(String(i + c + 1), { size: 9 }), { align: 'center' }) });
-            cells.push({ xml: ref ? photoCellXml(ref.rel, ref.id, tblW, tblH, '') : para('') });
-          } else {
-            const caption = [photo.caption, photo.caption2].filter(Boolean).join('\n');
-            cells.push({ xml: ref ? photoCellXml(ref.rel, ref.id, capW, capH, caption) : para('') });
-          }
-        }
-        rows.push(cells);
+      // One page per photos-per-page worth of photos, broken here rather than
+      // wherever Word would have run out of room.
+      const chunks = [];
+      for (let i = 0; i < b.photos.length; i += opts.perPage) {
+        chunks.push(b.photos.slice(i, i + opts.perPage));
       }
-      if (rows.length) {
-        const grid = tableFormat
-          ? Array.from({ length: cols }, () => [NUM_COL, tblW]).flat()
-          : Array.from({ length: cols }, () => capW);
-        body.push(table(grid, rows, { cellPadMm: 1 }));
+      if (!chunks.length) chunks.push([]);
+
+      for (let ci = 0; ci < chunks.length; ci++) {
+        const chunk = chunks[ci];
+        const breakHere = printed > 0;
+        if (headed) {
+          body.push(para(run(label, { bold: true, size: BLOCK_SIZE }),
+            { spaceAfter: 2, keepNext: true, pageBreakBefore: breakHere }));
+        } else if (breakHere) {
+          body.push(para('', { spaceAfter: 0, pageBreakBefore: true }));
+        }
+        printed++;
+
+        const capLines = tableFormat ? 0 : capLinesFor(chunk, capW, rowH);
+        const capBand = capLines * capLineH + 0.6;
+        const photoH = Math.max(20, rowH - capBand - CELL_PAD * 2);
+
+        // Photos laid out as a borderless grid so Word keeps them in step.
+        const rows = [];
+        for (let i = 0; i < chunk.length; i += cols) {
+          const cells = [];
+          for (let c = 0; c < cols; c++) {
+            const photo = chunk[i + c];
+            if (!photo) {
+              if (tableFormat) cells.push({ text: '' });
+              cells.push({ text: '' });
+              continue;
+            }
+            const ref = await addImage(photo);
+            if (tableFormat) {
+              // The number stands in for a caption; the table below refers to it.
+              cells.push({ xml: para(run(String(ci * opts.perPage + i + c + 1), { size: 9 }), { align: 'center' }) });
+              cells.push({ xml: ref ? photoCellXml(ref, tblW, tblH, '') : para('') });
+            } else {
+              const caption = [photo.caption, photo.caption2].filter(Boolean).join('\n');
+              cells.push({ xml: ref ? photoCellXml(ref, capW, photoH, caption) : para('') });
+            }
+          }
+          rows.push(cells);
+        }
+        if (rows.length) {
+          // Columns share the full content width, so the grid reaches both
+          // margins and the space left over falls between the photos.
+          const colTotal = CONTENT_W / cols;
+          const grid = tableFormat
+            ? Array.from({ length: cols }, () => [NUM_COL, colTotal - NUM_COL]).flat()
+            : Array.from({ length: cols }, () => colTotal);
+          body.push(table(grid, rows, {
+            cellPadMm: CELL_PAD,
+            rowHeightMm: tableFormat ? 0 : rowH,
+          }));
+        }
+        if (tableFormat && ci < chunks.length - 1) body.push(para('', { spaceAfter: 2 }));
       }
 
       if (tableFormat) {

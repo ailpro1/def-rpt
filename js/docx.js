@@ -41,17 +41,26 @@ export function para(runs, { align, spaceAfter = 0, spaceBefore = 0, keepNext = 
   return `<w:p><w:pPr>${props}</w:pPr>${Array.isArray(runs) ? runs.join('') : runs || ''}</w:p>`;
 }
 
-/** An inline image, sized in millimetres. `id` must be unique in the document. */
-export function image(relId, id, widthMm, heightMm, name = 'photo') {
+/**
+ * An inline image, sized in millimetres. `id` must be unique in the document.
+ * `crop` trims the source by a fraction of its own width/height ({l,t,r,b}),
+ * which is how a picture fills a fixed box without being stretched — Word's
+ * equivalent of the PDF's `fit: 'cover'`.
+ */
+export function image(relId, id, widthMm, heightMm, name = 'photo', crop = null) {
   const cx = mmToEmu(widthMm);
   const cy = mmToEmu(heightMm);
+  const pct = (v) => Math.max(0, Math.round((v || 0) * 100000));
+  const srcRect = crop
+    ? `<a:srcRect l="${pct(crop.l)}" t="${pct(crop.t)}" r="${pct(crop.r)}" b="${pct(crop.b)}"/>`
+    : '';
   return `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">`
     + `<wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="${esc(name)}"/>`
     + `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">`
     + `<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">`
     + `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">`
     + `<pic:nvPicPr><pic:cNvPr id="${id}" name="${esc(name)}"/><pic:cNvPicPr/></pic:nvPicPr>`
-    + `<pic:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>`
+    + `<pic:blipFill><a:blip r:embed="${relId}"/>${srcRect}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>`
     + `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>`
     + `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>`
     + `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
@@ -64,7 +73,7 @@ const BORDER = (sz) => ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']
  * A table with fixed column widths. `rows` is an array of arrays of cells:
  * { text | xml, bold, span, align }.
  */
-export function table(colsMm, rows, { borderEighthPt = 0, cellPadMm = 1.2 } = {}) {
+export function table(colsMm, rows, { borderEighthPt = 0, cellPadMm = 1.2, rowHeightMm = 0 } = {}) {
   const grid = colsMm.map((w) => `<w:gridCol w:w="${mmToTwip(w)}"/>`).join('');
   const pad = mmToTwip(cellPadMm);
   const body = rows.map((cells) => {
@@ -82,7 +91,11 @@ export function table(colsMm, rows, { borderEighthPt = 0, cellPadMm = 1.2 } = {}
         + `<w:bottom w:w="${pad}" w:type="dxa"/><w:right w:w="${pad}" w:type="dxa"/></w:tcMar>`
         + `</w:tcPr>${content}</w:tc>`;
     }).join('');
-    return `<w:tr>${tcs}</w:tr>`;
+    const trPr = rowHeightMm
+      // CT_TrPr's documented order: cantSplit before trHeight.
+      ? `<w:trPr><w:cantSplit/><w:trHeight w:val="${mmToTwip(rowHeightMm)}" w:hRule="atLeast"/></w:trPr>`
+      : '';
+    return `<w:tr>${trPr}${tcs}</w:tr>`;
   }).join('');
   const width = colsMm.reduce((a, b) => a + b, 0);
   return `<w:tbl><w:tblPr><w:tblW w:w="${mmToTwip(width)}" w:type="dxa"/>`
