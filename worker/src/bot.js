@@ -1,0 +1,187 @@
+// What the site team sees. Every reply is one short line, because this is read
+// one-handed, outdoors, on a phone.
+
+import * as tg from './telegram.js';
+import * as batch from './batch.js';
+
+const HELP = [
+  'Insta Report intake',
+  '',
+  '/project 23 JALAN KERUING — start a new batch',
+  '/sec KITCHEN — file the photos that follow under this section',
+  '/list — what is in the batch so far',
+  '/undo — remove the last photo',
+  '/done — finish and get the import code',
+  '/cancel — throw the batch away',
+  '',
+  'Send photos as File when the exact capture time matters — a normal photo is',
+  'compressed by Telegram and its capture time is lost, so the send time is used.',
+].join('\n');
+
+/** Parse "/sec KITCHEN" or "/sec@mybot KITCHEN" into ['sec', 'KITCHEN']. */
+function parseCommand(text) {
+  const m = /^\/([a-z_]+)(?:@\w+)?(?:\s+([\s\S]*))?$/i.exec((text || '').trim());
+  return m ? [m[1].toLowerCase(), (m[2] || '').trim()] : [null, ''];
+}
+
+export async function handleUpdate(env, update, ctx) {
+  const msg = update.message || update.channel_post;
+  if (!msg) return;
+
+  const chatId = msg.chat && msg.chat.id;
+  if (!allowed(env, chatId)) return;                  // silence, not an error page
+
+  if (msg.photo || msg.document) return filePhoto(env, msg, chatId, ctx);
+
+  const [cmd, rest] = parseCommand(msg.text);
+  if (!cmd) return;
+
+  switch (cmd) {
+    case 'start':
+    case 'help':
+      return tg.sendMessage(env, chatId, HELP);
+    case 'project':
+      return startProject(env, chatId, rest);
+    case 'sec':
+    case 'section':
+      return chooseSection(env, chatId, rest);
+    case 'list':
+      return listBatch(env, chatId);
+    case 'undo':
+      return undo(env, chatId);
+    case 'done':
+      return done(env, chatId, ctx);
+    case 'cancel':
+      return cancel(env, chatId);
+    default:
+      return tg.sendMessage(env, chatId, `Unknown command. ${'/help'} for the list.`);
+  }
+}
+
+/** An empty allowlist means "not configured yet" and accepts nothing. */
+function allowed(env, chatId) {
+  const list = String(env.ALLOWED_CHATS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return list.length > 0 && list.includes(String(chatId));
+}
+
+async function startProject(env, chatId, name) {
+  if (!name) return tg.sendMessage(env, chatId, 'Name it: /project 23 JALAN KERUING');
+  const open = await batch.activeBatch(env, chatId);
+  if (open) {
+    return tg.sendMessage(env, chatId,
+      `A batch for ${open.project.name || 'this chat'} is still open. /done it first, or /cancel.`);
+  }
+  const meta = await batch.openBatch(env, chatId, name);
+  return tg.sendMessage(env, chatId,
+    `Batch open — ${meta.project.name}\nNow: /sec CAR PORCH, then send the photos.`);
+}
+
+async function chooseSection(env, chatId, title) {
+  const meta = await batch.activeBatch(env, chatId);
+  if (!meta) return tg.sendMessage(env, chatId, 'No batch open. Start with /project <name>.');
+  if (!title) return tg.sendMessage(env, chatId, 'Name it: /sec KITCHEN');
+  await batch.setSection(env, meta, title);
+  return tg.sendMessage(env, chatId, `Section: ${meta.section}`);
+}
+
+/**
+ * File a photo against the batch's current section.
+ *
+ * Telegram re-encodes anything sent as a photo and drops its EXIF, so the send
+ * time is the best capture time available and is marked as such. A photo sent as
+ * a document keeps its original bytes — the import side reads EXIF out of those.
+ */
+async function filePhoto(env, msg, chatId, ctx) {
+  const meta = await batch.activeBatch(env, chatId);
+  if (!meta) return;                                  // chatter before /project: ignore
+
+  const asDocument = !!(msg.document && /^image\//.test(msg.document.mime_type || ''));
+  if (!msg.photo && !asDocument) return;              // a PDF or a voice note is not a defect
+
+  const big = asDocument ? null : tg.largest(msg.photo);
+  const rec = await batch.addPhoto(env, meta, {
+    id: msg.message_id,
+    fileId: asDocument ? msg.document.file_id : big.file_id,
+    caption: (msg.caption || '').trim(),
+    takenAt: (msg.date || Math.floor(Date.now() / 1000)) * 1000,
+    takenSource: asDocument ? 'file' : 'telegram',
+    w: asDocument ? 0 : big.width,
+    h: asDocument ? 0 : big.height,
+    mediaGroupId: msg.media_group_id || '',
+  });
+
+  // Album items arrive as separate updates seconds apart; acking each one would
+  // bury the chat, so only the first of a group speaks.
+  if (rec.mediaGroupId && !firstOfGroup(rec, msg)) return;
+  const photos = await batch.listPhotos(env, meta.code);
+  const n = photos.filter((p) => p.section === rec.section).length;
+  return tg.sendMessage(env, chatId, `✓ ${rec.section} · ${n}`,
+    { disable_notification: true });
+}
+
+// Telegram gives no "first of album" flag; the caption only rides on the first
+// item, which is a good enough proxy and costs nothing to check.
+const firstOfGroup = (rec, msg) => !!msg.caption || !rec.mediaGroupId;
+
+async function listBatch(env, chatId) {
+  const meta = await batch.activeBatch(env, chatId) || await lastClosed(env, chatId);
+  if (!meta) return tg.sendMessage(env, chatId, 'No batch open. Start with /project <name>.');
+  const photos = await batch.listPhotos(env, meta.code);
+  if (!photos.length) return tg.sendMessage(env, chatId, `${meta.project.name} — no photos yet.`);
+  const lines = batch.tally(photos).map(([sec, n]) => `${sec} — ${n}`);
+  return tg.sendMessage(env, chatId,
+    `${meta.project.name}\n${lines.join('\n')}\n${photos.length} photo(s) total.`);
+}
+
+async function undo(env, chatId) {
+  const meta = await batch.activeBatch(env, chatId);
+  if (!meta) return tg.sendMessage(env, chatId, 'No batch open.');
+  const photos = await batch.listPhotos(env, meta.code);
+  const last = photos[photos.length - 1];
+  if (!last) return tg.sendMessage(env, chatId, 'Nothing to undo.');
+  await batch.dropPhoto(env, meta.code, last.id);
+  return tg.sendMessage(env, chatId, `Removed one from ${last.section}. ${photos.length - 1} left.`);
+}
+
+async function cancel(env, chatId) {
+  const meta = await batch.activeBatch(env, chatId);
+  if (!meta) return tg.sendMessage(env, chatId, 'No batch open.');
+  await batch.deleteBatch(env, meta);
+  return tg.sendMessage(env, chatId, 'Batch discarded.');
+}
+
+async function done(env, chatId, ctx) {
+  const meta = await batch.activeBatch(env, chatId);
+  if (!meta) return tg.sendMessage(env, chatId, 'No batch open.');
+  const photos = await batch.listPhotos(env, meta.code);
+  if (!photos.length) {
+    await batch.deleteBatch(env, meta);
+    return tg.sendMessage(env, chatId, 'Empty batch — discarded.');
+  }
+  await batch.closeBatch(env, meta);
+  // So /list still answers after the batch is closed.
+  await env.BATCHES.put(`chat:${chatId}:last`, meta.code, { expirationTtl: batch.TTL_SECONDS });
+
+  const lines = batch.tally(photos).map(([sec, n]) => `${sec} — ${n}`);
+  await tg.sendMessage(env, chatId, [
+    `${meta.project.name} — done.`,
+    ...lines,
+    '',
+    `Import code: ${meta.code}`,
+    'Open Insta Report > + > Import from Telegram.',
+  ].join('\n'));
+
+  // The fallback: the same manifest as a file, for when typing a code is the
+  // wrong shape of effort. It is metadata only, so it stays tiny.
+  const doc = JSON.stringify(batch.manifest(meta, photos), null, 2);
+  const send = tg.sendDocument(env, chatId, `${meta.code}.instareport.json`, doc,
+    'Open this in Insta Report if you would rather not type the code.');
+  if (ctx && ctx.waitUntil) ctx.waitUntil(send.catch(() => {}));
+  else await send.catch(() => {});
+}
+
+/** /list after /done still answers, which is what someone checking would expect. */
+async function lastClosed(env, chatId) {
+  const code = await env.BATCHES.get(`chat:${chatId}:last`);
+  return code ? batch.getMeta(env, code) : null;
+}

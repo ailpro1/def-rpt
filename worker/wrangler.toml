@@ -1,0 +1,23 @@
+name = "insta-report-intake"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Deliberately minimal. There is no R2 bucket, no D1 database and no Durable
+# Object here, and none should be added: KV on the free plan covers this
+# workload, and enabling R2 requires a payment method on the Cloudflare account.
+# Photo bytes live in Telegram, not here.
+kv_namespaces = [
+  { binding = "BATCHES", id = "REPLACE_WITH_YOUR_KV_ID" },
+]
+
+[vars]
+# Comma-separated Telegram chat ids allowed to file photos. Empty means the bot
+# accepts nothing, which is the right default for a bot anyone can find.
+ALLOWED_CHATS = ""
+# Width to hand the model when captioning. One Gemini image tile.
+CAPTION_PX = "768"
+
+# Secrets are NOT set here — they would end up in git. Set them with:
+#   wrangler secret put TG_TOKEN
+#   wrangler secret put TG_WEBHOOK_SECRET
+#   wrangler secret put GEMINI_KEY        (stage 2 only)
