@@ -86,6 +86,16 @@ export const photo = ({ caption = '', chatId = -100123, group = '', date = 17890
   },
 });
 
+/**
+ * A photo forwarded from somewhere else. `sentAt` is when it was originally
+ * posted; `date` stays "now", as Telegram sets it on the forwarded copy.
+ */
+export const forwarded = ({ sentAt, caption = '', chatId = -100123 } = {}) => {
+  const u = photo({ caption, chatId, date: 1789300000 });
+  u.message.forward_origin = { type: 'user', date: sentAt };
+  return u;
+};
+
 export const document_ = ({ caption = '', chatId = -100123 } = {}) => ({
   message: {
     message_id: nextId++,

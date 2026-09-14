@@ -6,7 +6,7 @@ import worker from '../src/index.js';
 import { handleUpdate } from '../src/bot.js';
 import * as batch from '../src/batch.js';
 import {
-  FakeKV, fakeTelegram, makeEnv, ctx, cmd, photo, document_, check, report,
+  FakeKV, fakeTelegram, makeEnv, ctx, cmd, photo, document_, forwarded, check, report,
 } from './harness.js';
 
 const tgStub = fakeTelegram();
@@ -55,17 +55,31 @@ photos = await batch.listPhotos(env, code);
 const tail = photos.slice(-2).map((p) => p.id);
 check('album sorted by message id', tail[0] === 9001 && tail[1] === 9002, tail.join(','));
 
+/* ---------- forwarding ---------- */
+/* Photos reach the bot by being forwarded out of the site group, often days
+   later. The date that matters is when they were sent, not when they arrived. */
+
+const THREE_DAYS_EARLIER = 1789000000 - 3 * 86400;
+await feed(forwarded({ sentAt: THREE_DAYS_EARLIER, caption: 'FORWARDED ONE' }));
+photos = await batch.listPhotos(env, code);
+const fwd = photos.find((p) => p.caption === 'FORWARDED ONE');
+check('forwarded photo keeps its original date',
+  fwd && fwd.takenAt === THREE_DAYS_EARLIER * 1000,
+  fwd ? new Date(fwd.takenAt).toISOString() : 'not filed');
+check('a photo sent directly is unaffected',
+  photos[0].takenAt === 1789000000000, new Date(photos[0].takenAt).toISOString());
+
 /* ---------- /list and /undo ---------- */
 
 const before = tgStub.sent.length;
 await feed(cmd('/list'));
 const listReply = tgStub.texts().at(-1);
-check('/list counts by section', listReply.includes('CAR PORCH — 2') && listReply.includes('KITCHEN — 5'),
+check('/list counts by section', listReply.includes('CAR PORCH — 2') && listReply.includes('KITCHEN — 6'),
   listReply.replace(/\n/g, ' | '));
 
 await feed(cmd('/undo'));
 photos = await batch.listPhotos(env, code);
-check('/undo removes the last photo', photos.length === 6, `${photos.length}`);
+check('/undo removes the last photo', photos.length === 7, `${photos.length}`);
 check('/undo drops the newest, not the oldest', !photos.some((p) => p.id === 9002));
 
 /* ---------- a document keeps its own marker ---------- */
@@ -103,9 +117,9 @@ check('manifest served', manifestRes.status === 200);
 check('manifest names the project', manifest.project.name === '23 JALAN KERUING');
 check('manifest carries both sections', manifest.sections.length === 2,
   manifest.sections.map((s) => s.title).join(','));
-check('manifest photo count matches', manifest.total === 7, `${manifest.total}`);
+check('manifest photo count matches', manifest.total === 8, `${manifest.total}`);
 check('manifest numbers run across the batch',
-  manifest.sections.flatMap((s) => s.photos).map((p) => p.n).join(',') === '1,2,3,4,5,6,7');
+  manifest.sections.flatMap((s) => s.photos).map((p) => p.n).join(',') === '1,2,3,4,5,6,7,8');
 check('manifest is small', JSON.stringify(manifest).length < 4096,
   `${JSON.stringify(manifest).length} bytes`);
 check('manifest carries no image bytes', !/[A-Za-z0-9+/]{200,}/.test(JSON.stringify(manifest)));

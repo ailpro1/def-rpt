@@ -438,9 +438,7 @@ export async function timeAnomalies(projectId, { toleranceDays = 2 } = {}) {
   const noSource = [];
   const deltas = [];
   photos.forEach((p) => {
-    // 'telegram' is a send time, not a capture time — Telegram strips EXIF from
-    // a compressed photo — so it belongs with the ones worth retiming.
-    if (p.takenSource === 'now' || p.takenSource === 'telegram' || !photoTakenAt(p)) { noSource.push(p); return; }
+    if (p.takenSource === 'now' || !photoTakenAt(p)) { noSource.push(p); return; }
     if (base === null) return;
     const delta = photoTakenAt(p) - base;
     if (Math.abs(delta) > window) { offDate.push(p); deltas.push(delta); }

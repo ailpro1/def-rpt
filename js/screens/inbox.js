@@ -285,9 +285,9 @@ export default async function renderInbox(initialCode = '') {
     })));
 
     body.appendChild(ui.h('div', { class: 'hint',
-      text: 'Capture times come from when each photo was sent, not when it was taken — Telegram '
-        + 'removes the original time. The project screen can move a whole batch onto the '
-        + 'inspection date afterwards.' }));
+      text: 'The timestamp printed on each photo is the record. The time stored here is the '
+        + 'original send time, used only for ordering — the project screen can move a whole '
+        + 'batch onto the inspection date if it lands on the wrong day.' }));
 
     body.appendChild(ui.h('div', { class: 'btn-stack' },
       ui.h('button', {

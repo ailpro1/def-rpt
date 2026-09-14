@@ -1,8 +1,8 @@
 # Insta Report intake bot
 
-Site staff send photos to a Telegram group; this files them by section and the
-admin app collects them with an 8-character code. It runs on a Cloudflare Worker
-and is built to cost nothing.
+Site staff post photos to their Telegram group; you forward them to this bot,
+which files them by section so the admin app can collect a whole job with an
+8-character code. It runs on a Cloudflare Worker and is built to cost nothing.
 
 ## Why it stores nothing
 
@@ -38,10 +38,10 @@ the Cloudflare account.** Then nothing can bill, whatever anyone adds later.
    token it gives you. Treat it like a password: it goes into `wrangler secret`
    below, never into a file, a chat, or this repo.
 
-2. **Add the bot to the site group** and make it an admin (otherwise Telegram
-   hides other people's messages from it). Send `/id`-style: post any message,
-   then find the chat id — easiest is to add `@RawDataBot` briefly, or read it
-   from the Worker log on the first webhook hit.
+2. **Get your own user id.** Message `@userinfobot` and it replies with your id.
+   That is the only chat the bot will accept — you forward photos to it in a
+   private chat, so there is nothing to add to the site group, no admin rights
+   to grant, and no bot the team can reach.
 
 3. **Cloudflare.** Create a free account. Then:
 
@@ -51,7 +51,7 @@ the Cloudflare account.** Then nothing can bill, whatever anyone adds later.
    wrangler kv namespace create BATCHES
    ```
 
-   Put the id it prints into `wrangler.toml`, and the group's chat id into
+   Put the id it prints into `wrangler.toml`, and your user id into
    `ALLOWED_CHATS`. An empty allowlist accepts nothing, which is the right
    default for a bot anyone can find by name.
 
@@ -76,12 +76,15 @@ the Cloudflare account.** Then nothing can bill, whatever anyone adds later.
 6. **Point the app at it.** Insta Report (admin) → Settings → Telegram intake →
    paste `https://<your-worker>.workers.dev` → Test connection.
 
-## Using it on site
+## Using it
+
+Site staff post to their own group as they always have. You forward from there
+into the bot, in whatever order suits you:
 
 ```
 /project 23 JALAN KERUING      start a batch
 /sec CAR PORCH                 file what follows under this section
-<send photos>                  each one acked: ✓ CAR PORCH · 3
+<forward the car porch photos> each one acked: ✓ CAR PORCH · 3
 /sec KITCHEN                   switch section
 /list                          counts so far
 /undo                          drop the last photo
@@ -89,14 +92,17 @@ the Cloudflare account.** Then nothing can bill, whatever anyone adds later.
 /cancel                        throw it away
 ```
 
-A caption typed with a photo is kept. In an album, Telegram only carries the
-caption on the first item, so it applies to the whole album.
+In Telegram, select the photos in the group → **Forward** → the bot. An album
+forwards as an album, and a caption the team typed travels with it.
 
-**Capture times.** Telegram re-encodes anything sent as a *photo* and strips its
-EXIF, so the send time is used and marked as such — the app flags these and can
-retime a whole batch to the inspection date in one go. Send as **File** when the
-real capture time matters; the original bytes survive and the app reads the EXIF
-out of them.
+**Capture times.** A forwarded message carries the date it was *originally*
+sent, and that is what the bot records — so forwarding a week of work in one
+sitting still files each photo under the day it was taken, not today.
+
+The time that prints in the report is the one burnt into the photo by the
+camera. The stored time only orders the photos and lets the app spot a batch
+that has landed on the wrong day, where the project screen offers to retime the
+lot to the inspection date.
 
 ## API the app uses
 
@@ -113,16 +119,23 @@ out of them.
 node worker/test/run.js
 ```
 
-Runs the real handlers against a fake KV and a stubbed Telegram — a whole day on
-site, the HTTP API, the allowlist, and the KV write count. No wrangler, no
-network, no account needed.
+Runs the real handlers against a fake KV and a stubbed Telegram — a whole job,
+forwarded photos keeping their original date, the HTTP API, the allowlist, and
+the KV write count. No wrangler, no network, no account needed.
+
+`python3 worker/test/e2e.py` goes further: the real Worker on one port and the
+built admin app on another, driven in headless Chromium, so a batch really does
+become a project.
 
 ## Known limits
 
-- **KV is eventually consistent.** A photo sent in the same second as the `/sec`
-  before it can land in the previous section. `/list` and the per-photo ack exist
-  so that is caught on site rather than at 11pm. Leave a beat after `/sec`.
+- **KV is eventually consistent.** A photo forwarded in the same second as the
+  `/sec` before it can land in the previous section. The per-photo ack and
+  `/list` are there to catch it. Leave a beat after `/sec`.
 - **Telegram compresses photos** to around 1280px. Fine at 2 or 4 per page,
   softer than the app's own 1600px capture.
 - **One batch per chat at a time.** `/done` or `/cancel` before starting another.
+- **Photos already carry a timestamp** from the site team's camera, and the app
+  draws its own on export. Switch "Photo timestamps" off in the export sheet, or
+  a report of forwarded photos shows two.
 - Batches expire from KV after 14 days, and `claim` deletes them immediately.

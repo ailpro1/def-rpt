@@ -14,8 +14,8 @@ const HELP = [
   '/done — finish and get the import code',
   '/cancel — throw the batch away',
   '',
-  'Send photos as File when the exact capture time matters — a normal photo is',
-  'compressed by Telegram and its capture time is lost, so the send time is used.',
+  'Forward photos here from the site group. The date they were originally sent',
+  'is kept, so forwarding a week of work at once still files it by the right day.',
 ].join('\n');
 
 /** Parse "/sec KITCHEN" or "/sec@mybot KITCHEN" into ['sec', 'KITCHEN']. */
@@ -103,7 +103,7 @@ async function filePhoto(env, msg, chatId, ctx) {
     id: msg.message_id,
     fileId: asDocument ? msg.document.file_id : big.file_id,
     caption: (msg.caption || '').trim(),
-    takenAt: (msg.date || Math.floor(Date.now() / 1000)) * 1000,
+    takenAt: sentAt(msg) * 1000,
     takenSource: asDocument ? 'file' : 'telegram',
     w: asDocument ? 0 : big.width,
     h: asDocument ? 0 : big.height,
@@ -117,6 +117,20 @@ async function filePhoto(env, msg, chatId, ctx) {
   const n = photos.filter((p) => p.section === rec.section).length;
   return tg.sendMessage(env, chatId, `✓ ${rec.section} · ${n}`,
     { disable_notification: true });
+}
+
+/**
+ * When the photo was originally sent, not when it reached the bot. Photos are
+ * forwarded from the site group in batches, so the forward time is just when
+ * the office got round to it — a week of work would otherwise land on today.
+ *
+ * forward_origin is the current field and forward_date the older one; both are
+ * read so this works whichever the Bot API sends. Nothing changes for a photo
+ * sent to the bot directly.
+ */
+function sentAt(msg) {
+  const origin = msg.forward_origin || {};
+  return origin.date || msg.forward_date || msg.date || Math.floor(Date.now() / 1000);
 }
 
 // Telegram gives no "first of album" flag; the caption only rides on the first
