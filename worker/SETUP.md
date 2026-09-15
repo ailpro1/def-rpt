@@ -196,6 +196,22 @@ are still coming; you can wait, or import and use the app's own assistant.
 A caption the site team typed is never overwritten — they were standing in front
 of it. Captioning failures are not fatal: that photo simply arrives blank.
 
+## If an import stops partway
+
+A big job can be interrupted — the phone sleeps, the signal drops, the browser
+reclaims the tab. Nothing is lost and nothing needs undoing:
+
+- Every imported photo remembers which batch and message it came from, so
+  **importing the same code again tops up what is missing** rather than
+  doubling what is there. The screen says how many are already in, and the
+  button counts only what it will add.
+- The bot only forgets a batch after an import that fetched every photo, so the
+  code keeps working while anything is outstanding.
+- If the code has stopped working but photos are still missing, the import was
+  complete as far as the bot was concerned — the missing ones never reached it.
+  Send `/list` before `/done` to check the bot's counts against what you
+  forwarded.
+
 ---
 
 ## If something does not work
@@ -213,6 +229,7 @@ of it. Captioning failures are not fatal: that photo simply arrives blank.
 | App says "No batch with code…" | that batch was already imported — a batch is deleted once it lands — or the code is mistyped |
 | Bot says "No batch open" | `/project` was never sent, or `/done` already ran |
 | Photos are ignored, no tick | no batch open: send `/project <name>` first |
+| Fewer photos imported than you sent | run the import again with the same code — photos already in are skipped, so only the missing ones come down. If the code no longer works, the bot never received the rest: check `/list` against what you forwarded |
 | Captions never appear | `GEMINI_KEY` missing, or no cron trigger (steps 22–23). Visit `/api/caption/run?secret=…` — if that works but nothing happens on its own, the alarm clock in step 23 is what is missing |
 | `/api/caption/run` reports `failed` | its `errors` carry Google's own words. `429` is the free-tier rate limit and sorts itself out on later ticks |
 

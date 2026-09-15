@@ -7,7 +7,7 @@ import * as ui from '../ui.js';
 import { go } from '../app.js';
 import {
   getSettings, saveSettings, listProjects, createProject, getProject,
-  listSections, createSection, addPhoto, updatePhoto,
+  listSections, createSection, addPhoto, updatePhoto, listProjectPhotos,
 } from '../store.js';
 import { matchSection } from '../captions.js';
 import { ingest } from '../image.js';
@@ -26,6 +26,7 @@ export default async function renderInbox(initialCode = '') {
   let projectName = '';
   let mapping = new Map();           // incoming section title -> target title | SKIP
   let projects = [];
+  let alreadyHere = 0;        // photos of this batch the target project already has
   let busy = false;
 
   screen.appendChild(ui.navbar({
@@ -94,6 +95,7 @@ export default async function renderInbox(initialCode = '') {
    * created — never silently merged into something close-but-wrong.
    */
   async function remap() {
+    alreadyHere = target === NEW_PROJECT ? 0 : await countAlreadyHere(target);
     const existing = target === NEW_PROJECT ? [] : (await listSections(target)).map((s) => s.title);
     const candidates = [...new Set([...existing, ...(settings.sectionLib || [])])];
     mapping = new Map();
@@ -101,6 +103,17 @@ export default async function renderInbox(initialCode = '') {
       const m = matchSection(s.title, candidates);
       mapping.set(s.title, m ? m.title : s.title.toUpperCase());
     }
+  }
+
+  /** How much of this batch is already in that project, from an earlier run. */
+  async function countAlreadyHere(projectId) {
+    const have = new Set((await listProjectPhotos(projectId))
+      .map((p) => p.meta && p.meta.intake)
+      .filter((i) => i && i.code === manifest.code)
+      .map((i) => String(i.id)));
+    return manifest.sections
+      .flatMap((s) => s.photos)
+      .filter((p) => have.has(String(p.id))).length;
   }
 
   /* ---------------- the import itself ---------------- */
@@ -129,7 +142,16 @@ export default async function renderInbox(initialCode = '') {
 
       // Reuse a section of the same name rather than making a second one.
       const bySection = new Map((await listSections(projectId)).map((s) => [s.title.toUpperCase(), s]));
+      // Every photo remembers the batch and message it came from, so importing
+      // the same code again tops up what is missing instead of doubling it.
+      // That is what makes a run interrupted halfway — a dropped connection, a
+      // phone that slept, a tab the browser reclaimed — safe to simply repeat.
+      const already = new Set((await listProjectPhotos(projectId))
+        .map((p) => p.meta && p.meta.intake)
+        .filter(Boolean)
+        .map((i) => `${i.code}:${i.id}`));
       let done = 0;
+      let skipped = 0;
       const failed = [];
 
       for (const incoming of sections) {
@@ -141,6 +163,7 @@ export default async function renderInbox(initialCode = '') {
         }
 
         for (const photo of incoming.photos) {
+          if (already.has(`${manifest.code}:${photo.id}`)) { skipped++; done++; continue; }
           ui.toast(`Importing ${done + 1} of ${total}…`, 60000);
           try {
             const blob = await fetchPhoto(manifest.code, photo.id);
@@ -158,6 +181,7 @@ export default async function renderInbox(initialCode = '') {
               takenAt: meta.takenSource === 'exif' ? meta.takenAt : photo.takenAt,
               takenSource: meta.takenSource === 'exif' ? 'exif' : 'telegram',
               source: 'telegram',
+              intake: { code: manifest.code, id: photo.id },
               name: `tg-${photo.id}.jpg`,
             });
             if (photo.caption) await updatePhoto(added.id, { caption: photo.caption });
@@ -170,14 +194,19 @@ export default async function renderInbox(initialCode = '') {
       }
 
       ui.toast('');
+      const landed = done - failed.length - skipped;
       if (failed.length) {
         await ui.alert('Imported with gaps',
-          `${done - failed.length} of ${total} photos landed. ${failed.length} could not be fetched — `
-          + 'the code still works, so you can run the import again for the rest.');
+          `${landed} photo${landed === 1 ? '' : 's'} added${skipped ? `, ${skipped} already here` : ''}. `
+          + `${failed.length} could not be fetched.\n\n`
+          + 'Run the import again with the same code — the ones already in are skipped, '
+          + 'so only the missing ones come down.');
       } else {
         // Only drop the batch from the bot once every photo is safely here.
         await claimBatch(manifest.code);
-        ui.toast(`${total} photo${total === 1 ? '' : 's'} imported`, 2600);
+        ui.toast(skipped
+          ? `${landed} added, ${skipped} already here`
+          : `${total} photo${total === 1 ? '' : 's'} imported`, 2600);
       }
       go(`#/project/${projectId}`);
     } catch (err) {
@@ -253,9 +282,11 @@ export default async function renderInbox(initialCode = '') {
     const total = manifest.sections.reduce((n, s) => n + s.photos.length, 0);
     const captioned = manifest.sections.reduce(
       (n, s) => n + s.photos.filter((p) => p.caption).length, 0);
-    const keeping = manifest.sections
+    // What the button will actually add: selected sections, less anything a
+    // previous run already brought in.
+    const keeping = Math.max(0, manifest.sections
       .filter((s) => mapping.get(s.title) !== SKIP)
-      .reduce((n, s) => n + s.photos.length, 0);
+      .reduce((n, s) => n + s.photos.length, 0) - alreadyHere);
 
     // Captioning runs on the bot after /done, so a batch fetched straight away
     // can still be part-written. Nothing blocks on it — the count is shown and
@@ -264,6 +295,11 @@ export default async function renderInbox(initialCode = '') {
 
     body.appendChild(ui.group('Batch', [
       ui.row({ title: manifest.project?.name || 'Unnamed', sub: `${total} photos · ${captioned} captioned` }),
+      ...(alreadyHere ? [ui.row({
+        title: `${alreadyHere} already in this project`,
+        sub: `Only the remaining ${total - alreadyHere} will be added`,
+        iconName: 'check', iconColor: 'var(--sys-green)',
+      })] : []),
       ...(pending ? [ui.row({
         title: `${pending} caption${pending === 1 ? '' : 's'} still being written`,
         sub: 'Tap to check again — or import now and caption in the app',
@@ -303,7 +339,9 @@ export default async function renderInbox(initialCode = '') {
     body.appendChild(ui.h('div', { class: 'btn-stack' },
       ui.h('button', {
         class: 'btn primary wide',
-        text: busy ? 'Importing…' : `Import ${keeping} photo${keeping === 1 ? '' : 's'}`,
+        text: busy ? 'Importing…'
+          : keeping ? `Import ${keeping} photo${keeping === 1 ? '' : 's'}`
+            : 'Nothing left to import',
         disabled: busy || !keeping,
         onclick: runImport,
       }),

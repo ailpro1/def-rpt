@@ -43,6 +43,9 @@ await handleUpdate(env, cmd('/sec kitchen'), ctx);          // lower case on pur
 await handleUpdate(env, photo({ caption: 'UNFILLED GROUT' }), ctx);
 await handleUpdate(env, cmd('/sec MASTER BED'), ctx);       // needs fuzzy matching
 await handleUpdate(env, photo(), ctx);
+// Padding, so a test can interrupt an import partway through.
+const extra = Number(process.argv[3] || 0);
+for (let i = 0; i < extra; i++) await handleUpdate(env, photo(), ctx);
 const code = await kv.get('chat:-100123');
 await handleUpdate(env, cmd('/done'), ctx);
 
