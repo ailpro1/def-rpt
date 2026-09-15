@@ -37,12 +37,24 @@ export async function sendDocument(env, chatId, filename, text, caption) {
   const form = new FormData();
   form.set('chat_id', String(chatId));
   if (caption) form.set('caption', caption);
-  form.set('document', new File([text], filename, { type: 'application/json' }));
+  // Blob + a filename argument rather than `new File`, which is not reliably a
+  // global in the Workers runtime.
+  form.append('document', new Blob([text], { type: 'application/json' }), filename);
   const res = await fetch(`${API}/bot${env.TG_TOKEN}/sendDocument`, { method: 'POST', body: form });
   const data = await res.json().catch(() => ({}));
   if (!data.ok) throw new Error(`sendDocument failed: ${data.description || res.status}`);
   return data.result;
 }
+
+/** Tell Telegram where to deliver updates. Saves the user a curl. */
+export const setWebhook = (env, url, secret) => call(env, 'setWebhook', {
+  url,
+  secret_token: secret,
+  allowed_updates: ['message', 'channel_post'],
+});
+
+/** Who this token belongs to — used to confirm setup worked. */
+export const getMe = (env) => call(env, 'getMe', {});
 
 /**
  * Pick the variant nearest a target width. Telegram ships several sizes of every

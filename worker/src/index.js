@@ -44,6 +44,17 @@ export default {
         return json({ ok: true });
       }
 
+      // Visited once, by hand, from a browser: it points Telegram at this very
+      // Worker. The bot token stays here rather than going into a command line
+      // or the address bar.
+      if (path === '/tg/register') {
+        if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) return json({ error: 'no' }, 401);
+        const hook = `${url.origin}/tg/webhook`;
+        await tg.setWebhook(env, hook, env.TG_WEBHOOK_SECRET);
+        const me = await tg.getMe(env).catch(() => ({}));
+        return json({ ok: true, bot: me.username || null, webhook: hook });
+      }
+
       const manifestMatch = /^\/api\/batch\/([A-Z0-9]{4,16})$/.exec(path);
       if (manifestMatch) return serveManifest(env, manifestMatch[1]);
 
