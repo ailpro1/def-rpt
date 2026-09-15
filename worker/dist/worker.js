@@ -549,27 +549,75 @@ async function register(env, url) {
     return json({ ok: false, error: 'TG_TOKEN is not set. Add it in the Worker\u2019s '
       + 'Settings > Variables and Secrets, as a Secret, then Deploy and try again.' }, 400);
   }
-  if (!/^\d+:[A-Za-z0-9_-]{30,}$/.test(token)) {
-    return json({ ok: false, error: 'TG_TOKEN does not look like a bot token. It should be digits, '
-      + 'a colon, then letters and numbers \u2014 like 8123456789:AAF... Re-copy it from BotFather, '
-      + 'with no spaces or line breaks.' }, 400);
-  }
-  // Telegram is strict about this one and its error message is cryptic.
-  if (!/^[A-Za-z0-9_-]{1,256}$/.test(secret)) {
-    return json({ ok: false, error: 'TG_WEBHOOK_SECRET can only contain letters, numbers, '
-      + 'underscore and hyphen \u2014 Telegram rejects anything else, including spaces and '
-      + 'punctuation. Change it in Settings > Variables and Secrets, Deploy, then visit this '
-      + 'address again with the new value.' }, 400);
-  }
 
+  // Deliberately no local check of what a token or a secret should look like.
+  // Telegram is the authority on its own credentials, and a guess at the format
+  // here would sit between the user and a perfectly good token. Ask Telegram,
+  // and if it says no, describe what is stored so the bad paste is visible.
   const hook = `${url.origin}/tg/webhook`;
   try {
     await tg.setWebhook(env, hook, secret);
   } catch (err) {
-    return json({ ok: false, error: `Telegram refused: ${err.message}`, webhook: hook }, 502);
+    return json({
+      ok: false,
+      error: `Telegram refused: ${err.message}`,
+      webhook: hook,
+      check: describe(token, secret),
+      hint: hintFor(err.message, token, secret),
+    }, 502);
   }
   const me = await tg.getMe(env).catch(() => ({}));
   return json({ ok: true, bot: me.username || null, webhook: hook });
+}
+
+/**
+ * The shape of the stored values, never the values themselves. Enough to spot a
+ * paste that picked up a label, a quote, a line break or an invisible
+ * character — safe to paste into a chat when asking for help.
+ */
+function describe(token, secret) {
+  const colon = token.indexOf(':');
+  const common = (v) => ({
+    length: v.length,
+    hasWhitespace: /\s/.test(v),
+    hasQuotes: /['"]/.test(v),
+    nonAscii: /[^\x20-\x7E]/.test(v),
+  });
+  return {
+    TG_TOKEN: {
+      ...common(token),
+      hasColon: colon > 0,
+      digitsBeforeColon: colon > 0 && /^\d+$/.test(token.slice(0, colon)),
+      charsAfterColon: colon > 0 ? token.length - colon - 1 : 0,
+    },
+    TG_WEBHOOK_SECRET: {
+      ...common(secret),
+      // Telegram only accepts these in a secret_token.
+      onlyLettersNumbersDashUnderscore: /^[A-Za-z0-9_-]{1,256}$/.test(secret),
+    },
+  };
+}
+
+/** Turn the common failures into the actual next action. */
+function hintFor(message, token, secret) {
+  if (/secret_token/i.test(message)) {
+    return 'Change TG_WEBHOOK_SECRET to letters, numbers, underscore and hyphen only, '
+      + 'Deploy, then visit this address again with the new value.';
+  }
+  if (/unauthorized|not found/i.test(message)) {
+    if (!/^\d+:/.test(token)) {
+      return 'What is stored in TG_TOKEN does not start with digits and a colon, so it is '
+        + 'probably not the token — check you did not swap it with another value, or paste a '
+        + 'label like "TG_TOKEN=" along with it.';
+    }
+    return 'The token is the right shape but Telegram does not recognise it. Re-copy it from '
+      + 'BotFather (/mybots > your bot > API Token), replace TG_TOKEN, and Deploy.';
+  }
+  if (/url/i.test(message)) {
+    return 'Telegram could not accept this Worker address. It must be public https, which a '
+      + 'workers.dev address is — check the Worker is deployed.';
+  }
+  return 'Send me the whole of this reply; it carries no secret values.';
 }
 
 async function serveManifest(env, code) {

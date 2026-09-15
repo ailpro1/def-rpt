@@ -63,27 +63,55 @@ const noToken = await withEnv({ TG_TOKEN: '' });
 check('missing token is named', noToken.status === 400 && /TG_TOKEN is not set/.test(noToken.body.error),
   JSON.stringify(noToken));
 
-const badToken = await withEnv({ TG_TOKEN: 'not-a-token' });
-check('malformed token is named', badToken.status === 400 && /does not look like a bot token/.test(badToken.body.error),
-  JSON.stringify(badToken));
+// A token this Worker considers odd is still sent to Telegram: Telegram decides.
+const oddToken = await withEnv({ TG_TOKEN: 'no-colon-here' });
+check('an odd-looking token is not blocked locally',
+  oddToken.status === 200 || /Telegram refused/.test(oddToken.body.error || ''),
+  JSON.stringify(oddToken));
 
-const badSecretChars = await withEnv({ TG_WEBHOOK_SECRET: 'has spaces!' }, '/tg/register?secret=has spaces!');
-check('illegal secret characters are named',
-  badSecretChars.status === 400 && /letters, numbers/.test(badSecretChars.body.error),
-  JSON.stringify(badSecretChars));
+/* When Telegram does refuse, the reply has to be enough to act on without
+   anyone pasting a credential into a chat to ask for help. */
 
-// Telegram itself refusing, which is what "server error" used to hide.
 const saved = tgStub.fetchImpl;
-globalThis.fetch = async (u, init) => {
-  if (String(u).includes('/setWebhook')) {
-    return new Response(JSON.stringify({ ok: false, description: 'Unauthorized' }), { status: 401 });
-  }
-  return saved(u, init);
+const refuseWith = (description) => {
+  globalThis.fetch = async (u, init) => {
+    if (String(u).includes('/setWebhook')) {
+      return new Response(JSON.stringify({ ok: false, description }), { status: 400 });
+    }
+    return saved(u, init);
+  };
 };
-const refused = await withEnv({});
+
+refuseWith('Unauthorized');
+const refused = await withEnv({ TG_TOKEN: '  8123456789:AAFtesttesttesttesttesttesttesttest  ' });
 check('Telegram refusing is passed through',
   refused.status === 502 && /Telegram refused: .*Unauthorized/.test(refused.body.error),
   JSON.stringify(refused));
+check('a right-shaped token gets the re-copy hint',
+  /Re-copy it from BotFather/.test(refused.body.hint), String(refused.body.hint));
+check('the token is described, not revealed',
+  refused.body.check.TG_TOKEN.hasColon === true
+  && refused.body.check.TG_TOKEN.digitsBeforeColon === true
+  && refused.body.check.TG_TOKEN.charsAfterColon === 35,
+  JSON.stringify(refused.body.check));
+check('no credential appears anywhere in the reply',
+  !JSON.stringify(refused.body).includes('8123456789')
+  && !JSON.stringify(refused.body).includes('shh'),
+  JSON.stringify(refused.body));
+
+const swapped = await withEnv({ TG_TOKEN: 'vN9DCZGs40toh1eyg5VQ' });
+check('a value that is not token-shaped gets the swap hint',
+  /not the token|swap/.test(swapped.body.hint || ''), String(swapped.body.hint));
+
+refuseWith('Bad Request: secret_token contains unallowed characters');
+const badSecret2 = await withEnv({ TG_WEBHOOK_SECRET: 'has spaces!' }, '/tg/register?secret=has spaces!');
+check('a rejected secret gets the character hint',
+  /letters, numbers, underscore and hyphen/.test(badSecret2.body.hint || ''), String(badSecret2.body.hint));
+check('the secret is described, not revealed',
+  badSecret2.body.check.TG_WEBHOOK_SECRET.onlyLettersNumbersDashUnderscore === false
+  && !JSON.stringify(badSecret2.body).includes('has spaces'),
+  JSON.stringify(badSecret2.body.check));
+
 globalThis.fetch = saved;
 
 /* ---------- a whole job, through the webhook ---------- */

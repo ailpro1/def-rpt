@@ -88,8 +88,9 @@ copy one file.
     https://insta-intake.YOUR-NAME.workers.dev/tg/register?secret=YOUR_WEBHOOK_SECRET
     ```
 
-    If anything is wrong it tells you exactly what, in plain words — a missing
-    token, a secret with an illegal character, or Telegram's own refusal.
+    If anything is wrong, Telegram's own reason comes back along with a `hint`
+    saying what to change. The Worker does not second-guess your token — it asks
+    Telegram and reports the answer.
 
     You should see something like:
 
@@ -137,9 +138,15 @@ copy one file.
 | The bot never replies to anything | `ALLOWED_CHATS` is not your ID (step 15), or step 17 was skipped |
 | Step 17 complains about the secret not matching | the value after `secret=` in the address differs from `TG_WEBHOOK_SECRET` — check for a trailing space |
 | Step 17 says the secret can only contain letters, numbers, `_` and `-` | your secret has a space or punctuation in it. Change it in step 15, Deploy, then use the new value in step 17 |
-| Step 17 says the token is not set, or does not look like a bot token | `TG_TOKEN` is missing or was pasted with a space or line break — re-enter it in step 15 and Deploy |
-| Step 17 says "Telegram refused: … Unauthorized" | the token is a real shape but not a real token — re-copy it from BotFather |
-| Step 17 says "Telegram refused" something else | the message is Telegram's own words; send it to me and I'll decode it |
+| Step 17 says `TG_TOKEN is not set` | the variable is missing, or was added but not Deployed |
+| Step 17 says "Telegram refused: … Unauthorized" | the token is wrong. Re-copy it from BotFather: **/mybots** → your bot → **API Token** |
+| Step 17 says "Telegram refused" anything else | it comes back with a `hint` telling you what to do, and a `check` describing what is stored — send me the whole reply if it is still unclear |
+
+A refusal includes a `check` block like
+`"TG_TOKEN":{"length":46,"hasColon":true,"charsAfterColon":35,…}`. It describes
+the *shape* of what is stored, never the value, so it is safe to share when
+asking for help. Look there for a surprising length, `hasWhitespace: true`, or
+`hasQuotes: true` — all signs the paste picked up something extra.
 | App says "That address answered, but it is not an intake bot" | the paste in step 13 did not deploy, or the address has a typo |
 | App says "No batch with code…" | that batch was already imported — a batch is deleted once it lands — or the code is mistyped |
 | Bot says "No batch open" | `/project` was never sent, or `/done` already ran |
