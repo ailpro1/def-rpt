@@ -54,6 +54,11 @@ async function edit(path, fn) {
   await writeFile(path, fn(await readFile(path, 'utf8')));
 }
 
+// The version lives in sw.js, which is what actually changes on a release. The
+// app reads it so "which version am I running?" has an answer on the screen.
+const swSource = await readFile(join(ROOT, 'sw.js'), 'utf8');
+const VERSION = (/const VERSION = '([^']+)'/.exec(swSource) || [, 'dev'])[1];
+
 async function variant(v) {
   const out = join(DIST, v.dir);
   await mkdir(out, { recursive: true });
@@ -62,7 +67,7 @@ async function variant(v) {
   }
   for (const dead of v.drop) await rm(join(out, dead), { force: true });
 
-  await writeFile(join(out, 'js/build.js'), buildModule(v.build));
+  await writeFile(join(out, 'js/build.js'), buildModule({ ...v.build, version: VERSION }));
 
   await edit(join(out, 'index.html'), (s) => s
     .replace(/<title>[^<]*<\/title>/, `<title>${v.build.name}</title>`)

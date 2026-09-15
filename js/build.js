@@ -5,6 +5,7 @@
 //   site  — capture only: no assistant, no API key, smaller photos, one file out
 export const BUILD = {
   id: 'admin',
+  version: 'dev',
   name: 'Insta Report',
   shortName: 'Insta Report',
   // Kept apart so both apps can live on one phone: GitHub Pages serves them

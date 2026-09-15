@@ -4,6 +4,7 @@ import * as db from '../db.js';
 import { ingest, blobUrl } from '../image.js';
 import { exportBackup, importBackup, backupFilename, saveFile } from '../backup.js';
 import { BUILD } from '../build.js';
+import { updateWaiting, applyUpdate } from '../app.js';
 import { ask, listModels, modelFor, DEFAULT_MODEL, aiEnabled } from '../assist.js';
 import { intakeEnabled, testConnection, pushLibrary } from '../intake.js';
 
@@ -437,6 +438,24 @@ export default async function renderSettings() {
           await set(patch); paint(); ui.toast('Defaults restored');
         },
       }),
+    ]));
+
+    // Which version is running, and a way to take an update that is ready but
+    // waiting. The handover holds off while a sheet or an editor is open, which
+    // is exactly where someone sits when something is wrong — so it has to be
+    // possible to say "now".
+    body.appendChild(ui.group('App', [
+      ui.row({
+        title: 'Version',
+        value: BUILD.version || 'dev',
+        sub: updateWaiting() ? 'An update is ready' : 'Up to date',
+      }),
+      ...(updateWaiting() ? [ui.row({
+        title: 'Update now',
+        sub: 'Reloads the app. Projects and photos are not affected',
+        iconName: 'down', iconColor: 'var(--sys-green)',
+        onclick: () => applyUpdate(),
+      })] : []),
     ]));
 
     body.appendChild(ui.h('div', { class: 'group-note', style: { textAlign: 'center', padding: '22px 16px 4px' },

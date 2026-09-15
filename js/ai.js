@@ -334,7 +334,13 @@ export async function suggestCaptionsBatch(items, { sectionTitle = '', chunkSize
     if (failure) break;             // stop burning quota once a chunk has failed
   }
 
-  if (failure && !out.some((r) => r.text)) throw failure;
+  // Nothing came back at all: surface the reason the same way a single caption
+  // does, rather than the bare model error the ladder happened to end on.
+  if (failure && !out.some((r) => r.text)) {
+    throw failure.missing
+      ? new Error(`${failure.message} Check Settings > AI Assistant — the models this key offers may have changed.`)
+      : failure;
+  }
   return out;
 }
 

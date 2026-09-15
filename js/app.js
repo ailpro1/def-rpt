@@ -137,9 +137,25 @@ function showUpdating() {
    lost. Wait for the screen to be idle, then take the update. */
 const busy = () => !!document.querySelector('.editor, .sheet, .alert');
 
+// The worker that is built, waiting, and blocked on the screen being idle. The
+// settings screen offers to take it now, because the one place a user sits when
+// something is wrong — a sheet — is also a place this will not interrupt.
+let waitingWorker = null;
+export const updateWaiting = () => !!waitingWorker;
+
+/** Take the waiting update now, whatever is on screen. */
+export function applyUpdate() {
+  if (!waitingWorker) return false;
+  showUpdating();
+  setTimeout(() => waitingWorker.postMessage('skipWaiting'), 400);
+  setTimeout(() => reloadOnce(), 5000);
+  return true;
+}
+
 function handOver(worker) {
   if (handingOver || !worker) return;
   handingOver = true;
+  waitingWorker = worker;
   const go = () => {
     if (busy() || document.hidden) return setTimeout(go, 2000);
     showUpdating();
