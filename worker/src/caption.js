@@ -168,23 +168,24 @@ export async function captionPending(env, max = 6) {
   const out = { ok: true, done: 0, failed: 0, remaining: 0, errors: [] };
 
   for (const code of await openCodes(env)) {
-    const photos = await batch.listPhotos(env, code);
-    const meta = await batch.getMeta(env, code);
-    if (!meta) continue;
+    // Summaries first, so finding the handful still to do costs one request
+    // rather than one per photo. Only the ones actually being captioned are
+    // then read in full.
+    const waiting = (await batch.listSummaries(env, code)).filter((p) => !p.tried);
+    if (!waiting.length) continue;
 
-    for (const p of photos) {
-      // A caption the site team typed wins: they were standing in front of it.
-      if (p.caption || p.aiCaption !== undefined) continue;
+    for (const s of waiting) {
       if (out.done + out.failed >= max) { out.remaining++; continue; }
-
       try {
-        await captionOne(env, code, p, lib, cool);
+        const photo = await batch.getPhoto(env, code, s.id);
+        if (!photo) continue;
+        await captionOne(env, code, photo, lib, cool);
         out.done++;
       } catch (err) {
         out.failed++;
         if (out.errors.length < 3) out.errors.push(err.message);
         // Mark it tried so one unreadable photo cannot block the queue forever.
-        await batch.updatePhoto(env, code, p.id, { aiCaption: '' });
+        await batch.updatePhoto(env, code, s.id, { aiCaption: '' });
       }
     }
   }

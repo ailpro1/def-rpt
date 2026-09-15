@@ -79,6 +79,32 @@ async function setSection(env, meta, title) {
  * album items can reach the webhook out of order, but their message ids do not
  * lie about the order they were sent in.
  */
+/**
+ * The fields anything other than captioning needs. KV can carry this alongside
+ * the key, so a listing returns it without a read per photo — which is the
+ * difference between a batch costing one request and costing one per photo.
+ */
+function summary(rec) {
+  return {
+    id: rec.id,
+    section: rec.section,
+    caption: rec.aiCaption || rec.caption || '',
+    captionSource: rec.aiCaption ? 'ai' : (rec.caption ? 'typed' : ''),
+    tried: rec.aiCaption !== undefined || !!rec.caption,
+    takenAt: rec.takenAt,
+    takenSource: rec.takenSource,
+    w: rec.w,
+    h: rec.h,
+  };
+}
+
+/** Write a photo, keeping its summary on the key. */
+const putPhoto = (env, code, rec) =>
+  env.BATCHES.put(photoKey(code, rec.id), JSON.stringify(rec), {
+    expirationTtl: TTL_SECONDS,
+    metadata: summary(rec),
+  });
+
 async function addPhoto(env, meta, photo) {
   const rec = {
     id: photo.id,
@@ -94,19 +120,26 @@ async function addPhoto(env, meta, photo) {
     // Filled in later by the captioning pass; absent means "not looked at yet".
     aiCaption: undefined,
   };
-  await env.BATCHES.put(photoKey(meta.code, rec.id), JSON.stringify(rec), { expirationTtl: TTL_SECONDS });
+  await putPhoto(env, meta.code, rec);
   return rec;
 }
 
-/** Every photo in the batch, in the order they were sent. */
-async function listPhotos(env, code) {
+/**
+ * Every photo's summary, in the order they were sent, from the key listing
+ * alone — a page of a thousand keys is one request, however big the job.
+ *
+ * Nothing on a hot path may read photos one by one: a 200-photo batch would
+ * then cost 200 reads every time a photo is served or the chat is acked, and a
+ * Worker is cut off long before that.
+ */
+async function listSummaries(env, code) {
   const out = [];
   let cursor;
   do {
     const page = await env.BATCHES.list({ prefix: `batch:${code}:p:`, cursor });
     for (const k of page.keys) {
-      const raw = await env.BATCHES.get(k.name);
-      if (raw) out.push(JSON.parse(raw));
+      if (k.metadata) out.push(k.metadata);
+      else out.push({ id: Number(k.name.split(':').pop()), section: 'GENERAL', caption: '', tried: false });
     }
     cursor = page.list_complete ? null : page.cursor;
   } while (cursor);
@@ -114,12 +147,27 @@ async function listPhotos(env, code) {
   return out;
 }
 
+/** One photo's full record. */
+async function getPhoto(env, code, id) {
+  const raw = await env.BATCHES.get(photoKey(code, id));
+  return raw ? JSON.parse(raw) : null;
+}
+
+/** Every full record. Only for a pass that genuinely needs all of them. */
+async function listPhotos(env, code) {
+  const out = [];
+  for (const s of await listSummaries(env, code)) {
+    const rec = await getPhoto(env, code, s.id);
+    if (rec) out.push(rec);
+  }
+  return out;
+}
+
 async function updatePhoto(env, code, id, patch) {
-  const key = photoKey(code, id);
-  const raw = await env.BATCHES.get(key);
-  if (!raw) return null;
-  const rec = { ...JSON.parse(raw), ...patch };
-  await env.BATCHES.put(key, JSON.stringify(rec), { expirationTtl: TTL_SECONDS });
+  const current = await getPhoto(env, code, id);
+  if (!current) return null;
+  const rec = { ...current, ...patch };
+  await putPhoto(env, code, rec);
   return rec;
 }
 
@@ -135,11 +183,20 @@ async function closeBatch(env, meta) {
   return meta;
 }
 
-async function deleteBatch(env, meta) {
-  const photos = await listPhotos(env, meta.code);
-  for (const p of photos) await env.BATCHES.delete(photoKey(meta.code, p.id));
+/**
+ * Retire a batch. The meta and chat keys go first, because those are what make
+ * the code work — once they are gone the batch is gone as far as anyone can
+ * tell. The photo keys are then cleared within a budget rather than all at
+ * once; every key already carries a 14-day expiry, so anything left over is
+ * swept up by KV itself instead of costing this request a read apiece.
+ */
+async function deleteBatch(env, meta, budget = 40) {
   await env.BATCHES.delete(metaKey(meta.code));
   await env.BATCHES.delete(chatKey(meta.chatId));
+  const summaries = await listSummaries(env, meta.code);
+  for (const s of summaries.slice(0, budget)) {
+    await env.BATCHES.delete(photoKey(meta.code, s.id));
+  }
 }
 
 /**
@@ -173,7 +230,7 @@ function manifest(meta, photos) {
     createdAt: meta.createdAt,
     closedAt: meta.closedAt,
     total: photos.length,
-    pending: photos.filter((p) => p.aiCaption === undefined && !p.caption).length,
+    pending: photos.filter((p) => (p.tried !== undefined ? !p.tried : (p.aiCaption === undefined && !p.caption))).length,
     sections: order.map((title) => ({ title, photos: bySection.get(title) })),
   };
 }
@@ -185,7 +242,7 @@ function tally(photos) {
   return [...counts.entries()];
 }
 
-const batch = { newCode, openBatch, getMeta, activeBatch, setSection, addPhoto, listPhotos, updatePhoto, dropPhoto, closeBatch, deleteBatch, manifest, tally, TTL_SECONDS, putMeta };
+const batch = { newCode, openBatch, getMeta, activeBatch, setSection, summary, addPhoto, listSummaries, getPhoto, listPhotos, updatePhoto, dropPhoto, closeBatch, deleteBatch, manifest, tally, TTL_SECONDS, putMeta };
 
 /* ---------- telegram.js ---------- */
 
@@ -435,23 +492,24 @@ async function captionPending(env, max = 6) {
   const out = { ok: true, done: 0, failed: 0, remaining: 0, errors: [] };
 
   for (const code of await openCodes(env)) {
-    const photos = await batch.listPhotos(env, code);
-    const meta = await batch.getMeta(env, code);
-    if (!meta) continue;
+    // Summaries first, so finding the handful still to do costs one request
+    // rather than one per photo. Only the ones actually being captioned are
+    // then read in full.
+    const waiting = (await batch.listSummaries(env, code)).filter((p) => !p.tried);
+    if (!waiting.length) continue;
 
-    for (const p of photos) {
-      // A caption the site team typed wins: they were standing in front of it.
-      if (p.caption || p.aiCaption !== undefined) continue;
+    for (const s of waiting) {
       if (out.done + out.failed >= max) { out.remaining++; continue; }
-
       try {
-        await captionOne(env, code, p, lib, cool);
+        const photo = await batch.getPhoto(env, code, s.id);
+        if (!photo) continue;
+        await captionOne(env, code, photo, lib, cool);
         out.done++;
       } catch (err) {
         out.failed++;
         if (out.errors.length < 3) out.errors.push(err.message);
         // Mark it tried so one unreadable photo cannot block the queue forever.
-        await batch.updatePhoto(env, code, p.id, { aiCaption: '' });
+        await batch.updatePhoto(env, code, s.id, { aiCaption: '' });
       }
     }
   }
@@ -621,7 +679,7 @@ async function filePhoto(env, msg, chatId, ctx) {
   // Album items arrive as separate updates seconds apart; acking each one would
   // bury the chat, so only the first of a group speaks.
   if (rec.mediaGroupId && !firstOfGroup(rec, msg)) return;
-  const photos = await batch.listPhotos(env, meta.code);
+  const photos = await batch.listSummaries(env, meta.code);
   const n = photos.filter((p) => p.section === rec.section).length;
   return tg.sendMessage(env, chatId, `✓ ${rec.section} · ${n}`,
     { disable_notification: true });
@@ -648,7 +706,7 @@ const firstOfGroup = (rec, msg) => !!msg.caption || !rec.mediaGroupId;
 async function listBatch(env, chatId) {
   const meta = await batch.activeBatch(env, chatId) || await lastClosed(env, chatId);
   if (!meta) return tg.sendMessage(env, chatId, 'No batch open. Start with /project <name>.');
-  const photos = await batch.listPhotos(env, meta.code);
+  const photos = await batch.listSummaries(env, meta.code);
   if (!photos.length) return tg.sendMessage(env, chatId, `${meta.project.name} — no photos yet.`);
   const lines = batch.tally(photos).map(([sec, n]) => `${sec} — ${n}`);
   return tg.sendMessage(env, chatId,
@@ -658,7 +716,7 @@ async function listBatch(env, chatId) {
 async function undo(env, chatId) {
   const meta = await batch.activeBatch(env, chatId);
   if (!meta) return tg.sendMessage(env, chatId, 'No batch open.');
-  const photos = await batch.listPhotos(env, meta.code);
+  const photos = await batch.listSummaries(env, meta.code);
   const last = photos[photos.length - 1];
   if (!last) return tg.sendMessage(env, chatId, 'Nothing to undo.');
   await batch.dropPhoto(env, meta.code, last.id);
@@ -675,7 +733,7 @@ async function cancel(env, chatId) {
 async function done(env, chatId, ctx) {
   const meta = await batch.activeBatch(env, chatId);
   if (!meta) return tg.sendMessage(env, chatId, 'No batch open.');
-  const photos = await batch.listPhotos(env, meta.code);
+  const photos = await batch.listSummaries(env, meta.code);
   if (!photos.length) {
     await batch.deleteBatch(env, meta);
     return tg.sendMessage(env, chatId, 'Empty batch — discarded.');
@@ -930,8 +988,9 @@ function hintFor(message, token, secret) {
 async function serveManifest(env, code) {
   const meta = await batch.getMeta(env, code);
   if (!meta) return json({ error: 'unknown code' }, 404);
-  const photos = await batch.listPhotos(env, code);
-  return json(batch.manifest(meta, photos));
+  // Summaries, not full records: a 200-photo batch is a couple of requests
+  // rather than 200, which is the difference between working and being cut off.
+  return json(batch.manifest(meta, await batch.listSummaries(env, code)));
 }
 
 /**
@@ -941,8 +1000,7 @@ async function serveManifest(env, code) {
 async function servePhoto(env, code, id) {
   const meta = await batch.getMeta(env, code);
   if (!meta) return json({ error: 'unknown code' }, 404);
-  const photos = await batch.listPhotos(env, code);
-  const photo = photos.find((p) => p.id === id);
+  const photo = await batch.getPhoto(env, code, id);
   if (!photo) return json({ error: 'unknown photo' }, 404);
 
   const upstream = await tg.openFile(env, photo.fileId);

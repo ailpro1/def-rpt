@@ -230,6 +230,7 @@ reclaims the tab. Nothing is lost and nothing needs undoing:
 | Bot says "No batch open" | `/project` was never sent, or `/done` already ran |
 | Photos are ignored, no tick | no batch open: send `/project <name>` first |
 | Fewer photos imported than you sent | run the import again with the same code — photos already in are skipped, so only the missing ones come down. If the code no longer works, the bot never received the rest: check `/list` against what you forwarded |
+| "Could not reach the intake bot" on a big batch | the Worker is out of date. Re-paste `worker/dist/worker.js` (step 13) and Deploy. Before this fix, a large batch cost the Worker one storage read per photo on every request, and Cloudflare cut it off — the browser reports that as unreachable, because the error page it gets back carries no CORS headers |
 | Captions never appear | `GEMINI_KEY` missing, or no cron trigger (steps 22–23). Visit `/api/caption/run?secret=…` — if that works but nothing happens on its own, the alarm clock in step 23 is what is missing |
 | `/api/caption/run` reports `failed` | its `errors` carry Google's own words. `429` is the free-tier rate limit and sorts itself out on later ticks |
 

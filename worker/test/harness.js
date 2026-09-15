@@ -3,23 +3,37 @@
 // and a Telegram that records what the bot said instead of sending it.
 
 export class FakeKV {
-  constructor() { this.map = new Map(); this.writes = 0; this.reads = 0; }
+  constructor() {
+    this.map = new Map();
+    this.meta = new Map();
+    this.writes = 0;
+    this.reads = 0;
+    this.lists = 0;
+  }
 
   async get(key) { this.reads++; return this.map.has(key) ? this.map.get(key) : null; }
 
-  async put(key, value) { this.writes++; this.map.set(key, String(value)); }
+  async put(key, value, opts = {}) {
+    this.writes++;
+    this.map.set(key, String(value));
+    // The real KV carries a small object alongside the key, returned by list()
+    // without a read. Several hot paths depend on that, so the fake must have it.
+    if (opts.metadata) this.meta.set(key, JSON.parse(JSON.stringify(opts.metadata)));
+    else this.meta.delete(key);
+  }
 
-  async delete(key) { this.map.delete(key); }
+  async delete(key) { this.map.delete(key); this.meta.delete(key); }
 
   // The real list() pages; page it here too so the caller's cursor loop is
   // actually exercised rather than trivially satisfied.
   async list({ prefix = '', cursor, limit = 3 } = {}) {
+    this.lists++;
     const keys = [...this.map.keys()].filter((k) => k.startsWith(prefix)).sort();
     const start = cursor ? Number(cursor) : 0;
     const slice = keys.slice(start, start + limit);
     const end = start + slice.length;
     return {
-      keys: slice.map((name) => ({ name })),
+      keys: slice.map((name) => ({ name, metadata: this.meta.get(name) })),
       list_complete: end >= keys.length,
       cursor: String(end),
     };

@@ -118,7 +118,7 @@ async function filePhoto(env, msg, chatId, ctx) {
   // Album items arrive as separate updates seconds apart; acking each one would
   // bury the chat, so only the first of a group speaks.
   if (rec.mediaGroupId && !firstOfGroup(rec, msg)) return;
-  const photos = await batch.listPhotos(env, meta.code);
+  const photos = await batch.listSummaries(env, meta.code);
   const n = photos.filter((p) => p.section === rec.section).length;
   return tg.sendMessage(env, chatId, `✓ ${rec.section} · ${n}`,
     { disable_notification: true });
@@ -145,7 +145,7 @@ const firstOfGroup = (rec, msg) => !!msg.caption || !rec.mediaGroupId;
 async function listBatch(env, chatId) {
   const meta = await batch.activeBatch(env, chatId) || await lastClosed(env, chatId);
   if (!meta) return tg.sendMessage(env, chatId, 'No batch open. Start with /project <name>.');
-  const photos = await batch.listPhotos(env, meta.code);
+  const photos = await batch.listSummaries(env, meta.code);
   if (!photos.length) return tg.sendMessage(env, chatId, `${meta.project.name} — no photos yet.`);
   const lines = batch.tally(photos).map(([sec, n]) => `${sec} — ${n}`);
   return tg.sendMessage(env, chatId,
@@ -155,7 +155,7 @@ async function listBatch(env, chatId) {
 async function undo(env, chatId) {
   const meta = await batch.activeBatch(env, chatId);
   if (!meta) return tg.sendMessage(env, chatId, 'No batch open.');
-  const photos = await batch.listPhotos(env, meta.code);
+  const photos = await batch.listSummaries(env, meta.code);
   const last = photos[photos.length - 1];
   if (!last) return tg.sendMessage(env, chatId, 'Nothing to undo.');
   await batch.dropPhoto(env, meta.code, last.id);
@@ -172,7 +172,7 @@ async function cancel(env, chatId) {
 async function done(env, chatId, ctx) {
   const meta = await batch.activeBatch(env, chatId);
   if (!meta) return tg.sendMessage(env, chatId, 'No batch open.');
-  const photos = await batch.listPhotos(env, meta.code);
+  const photos = await batch.listSummaries(env, meta.code);
   if (!photos.length) {
     await batch.deleteBatch(env, meta);
     return tg.sendMessage(env, chatId, 'Empty batch — discarded.');

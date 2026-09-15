@@ -69,6 +69,32 @@ export async function setSection(env, meta, title) {
  * album items can reach the webhook out of order, but their message ids do not
  * lie about the order they were sent in.
  */
+/**
+ * The fields anything other than captioning needs. KV can carry this alongside
+ * the key, so a listing returns it without a read per photo — which is the
+ * difference between a batch costing one request and costing one per photo.
+ */
+export function summary(rec) {
+  return {
+    id: rec.id,
+    section: rec.section,
+    caption: rec.aiCaption || rec.caption || '',
+    captionSource: rec.aiCaption ? 'ai' : (rec.caption ? 'typed' : ''),
+    tried: rec.aiCaption !== undefined || !!rec.caption,
+    takenAt: rec.takenAt,
+    takenSource: rec.takenSource,
+    w: rec.w,
+    h: rec.h,
+  };
+}
+
+/** Write a photo, keeping its summary on the key. */
+const putPhoto = (env, code, rec) =>
+  env.BATCHES.put(photoKey(code, rec.id), JSON.stringify(rec), {
+    expirationTtl: TTL_SECONDS,
+    metadata: summary(rec),
+  });
+
 export async function addPhoto(env, meta, photo) {
   const rec = {
     id: photo.id,
@@ -84,19 +110,26 @@ export async function addPhoto(env, meta, photo) {
     // Filled in later by the captioning pass; absent means "not looked at yet".
     aiCaption: undefined,
   };
-  await env.BATCHES.put(photoKey(meta.code, rec.id), JSON.stringify(rec), { expirationTtl: TTL_SECONDS });
+  await putPhoto(env, meta.code, rec);
   return rec;
 }
 
-/** Every photo in the batch, in the order they were sent. */
-export async function listPhotos(env, code) {
+/**
+ * Every photo's summary, in the order they were sent, from the key listing
+ * alone — a page of a thousand keys is one request, however big the job.
+ *
+ * Nothing on a hot path may read photos one by one: a 200-photo batch would
+ * then cost 200 reads every time a photo is served or the chat is acked, and a
+ * Worker is cut off long before that.
+ */
+export async function listSummaries(env, code) {
   const out = [];
   let cursor;
   do {
     const page = await env.BATCHES.list({ prefix: `batch:${code}:p:`, cursor });
     for (const k of page.keys) {
-      const raw = await env.BATCHES.get(k.name);
-      if (raw) out.push(JSON.parse(raw));
+      if (k.metadata) out.push(k.metadata);
+      else out.push({ id: Number(k.name.split(':').pop()), section: 'GENERAL', caption: '', tried: false });
     }
     cursor = page.list_complete ? null : page.cursor;
   } while (cursor);
@@ -104,12 +137,27 @@ export async function listPhotos(env, code) {
   return out;
 }
 
+/** One photo's full record. */
+export async function getPhoto(env, code, id) {
+  const raw = await env.BATCHES.get(photoKey(code, id));
+  return raw ? JSON.parse(raw) : null;
+}
+
+/** Every full record. Only for a pass that genuinely needs all of them. */
+export async function listPhotos(env, code) {
+  const out = [];
+  for (const s of await listSummaries(env, code)) {
+    const rec = await getPhoto(env, code, s.id);
+    if (rec) out.push(rec);
+  }
+  return out;
+}
+
 export async function updatePhoto(env, code, id, patch) {
-  const key = photoKey(code, id);
-  const raw = await env.BATCHES.get(key);
-  if (!raw) return null;
-  const rec = { ...JSON.parse(raw), ...patch };
-  await env.BATCHES.put(key, JSON.stringify(rec), { expirationTtl: TTL_SECONDS });
+  const current = await getPhoto(env, code, id);
+  if (!current) return null;
+  const rec = { ...current, ...patch };
+  await putPhoto(env, code, rec);
   return rec;
 }
 
@@ -125,11 +173,20 @@ export async function closeBatch(env, meta) {
   return meta;
 }
 
-export async function deleteBatch(env, meta) {
-  const photos = await listPhotos(env, meta.code);
-  for (const p of photos) await env.BATCHES.delete(photoKey(meta.code, p.id));
+/**
+ * Retire a batch. The meta and chat keys go first, because those are what make
+ * the code work — once they are gone the batch is gone as far as anyone can
+ * tell. The photo keys are then cleared within a budget rather than all at
+ * once; every key already carries a 14-day expiry, so anything left over is
+ * swept up by KV itself instead of costing this request a read apiece.
+ */
+export async function deleteBatch(env, meta, budget = 40) {
   await env.BATCHES.delete(metaKey(meta.code));
   await env.BATCHES.delete(chatKey(meta.chatId));
+  const summaries = await listSummaries(env, meta.code);
+  for (const s of summaries.slice(0, budget)) {
+    await env.BATCHES.delete(photoKey(meta.code, s.id));
+  }
 }
 
 /**
@@ -163,7 +220,7 @@ export function manifest(meta, photos) {
     createdAt: meta.createdAt,
     closedAt: meta.closedAt,
     total: photos.length,
-    pending: photos.filter((p) => p.aiCaption === undefined && !p.caption).length,
+    pending: photos.filter((p) => (p.tried !== undefined ? !p.tried : (p.aiCaption === undefined && !p.caption))).length,
     sections: order.map((title) => ({ title, photos: bySection.get(title) })),
   };
 }

@@ -219,8 +219,9 @@ function hintFor(message, token, secret) {
 async function serveManifest(env, code) {
   const meta = await batch.getMeta(env, code);
   if (!meta) return json({ error: 'unknown code' }, 404);
-  const photos = await batch.listPhotos(env, code);
-  return json(batch.manifest(meta, photos));
+  // Summaries, not full records: a 200-photo batch is a couple of requests
+  // rather than 200, which is the difference between working and being cut off.
+  return json(batch.manifest(meta, await batch.listSummaries(env, code)));
 }
 
 /**
@@ -230,8 +231,7 @@ async function serveManifest(env, code) {
 async function servePhoto(env, code, id) {
   const meta = await batch.getMeta(env, code);
   if (!meta) return json({ error: 'unknown code' }, 404);
-  const photos = await batch.listPhotos(env, code);
-  const photo = photos.find((p) => p.id === id);
+  const photo = await batch.getPhoto(env, code, id);
   if (!photo) return json({ error: 'unknown photo' }, 404);
 
   const upstream = await tg.openFile(env, photo.fileId);
