@@ -48,11 +48,10 @@ export default {
       // Worker. The bot token stays here rather than going into a command line
       // or the address bar.
       if (path === '/tg/register') {
-        if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) return json({ error: 'no' }, 401);
-        const hook = `${url.origin}/tg/webhook`;
-        await tg.setWebhook(env, hook, env.TG_WEBHOOK_SECRET);
-        const me = await tg.getMe(env).catch(() => ({}));
-        return json({ ok: true, bot: me.username || null, webhook: hook });
+        if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
+          return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
+        }
+        return register(env, url);
       }
 
       const manifestMatch = /^\/api\/batch\/([A-Z0-9]{4,16})$/.exec(path);
@@ -71,6 +70,42 @@ export default {
     }
   },
 };
+
+/**
+ * Point Telegram at this Worker. This is the one step done by hand during
+ * setup, so it says exactly what is wrong rather than falling into the generic
+ * 500 — it is already behind the secret, so there is nothing to hide here.
+ */
+async function register(env, url) {
+  const token = String(env.TG_TOKEN || '').trim();
+  const secret = String(env.TG_WEBHOOK_SECRET || '');
+
+  if (!token) {
+    return json({ ok: false, error: 'TG_TOKEN is not set. Add it in the Worker\u2019s '
+      + 'Settings > Variables and Secrets, as a Secret, then Deploy and try again.' }, 400);
+  }
+  if (!/^\d+:[A-Za-z0-9_-]{30,}$/.test(token)) {
+    return json({ ok: false, error: 'TG_TOKEN does not look like a bot token. It should be digits, '
+      + 'a colon, then letters and numbers \u2014 like 8123456789:AAF... Re-copy it from BotFather, '
+      + 'with no spaces or line breaks.' }, 400);
+  }
+  // Telegram is strict about this one and its error message is cryptic.
+  if (!/^[A-Za-z0-9_-]{1,256}$/.test(secret)) {
+    return json({ ok: false, error: 'TG_WEBHOOK_SECRET can only contain letters, numbers, '
+      + 'underscore and hyphen \u2014 Telegram rejects anything else, including spaces and '
+      + 'punctuation. Change it in Settings > Variables and Secrets, Deploy, then visit this '
+      + 'address again with the new value.' }, 400);
+  }
+
+  const hook = `${url.origin}/tg/webhook`;
+  try {
+    await tg.setWebhook(env, hook, secret);
+  } catch (err) {
+    return json({ ok: false, error: `Telegram refused: ${err.message}`, webhook: hook }, 502);
+  }
+  const me = await tg.getMe(env).catch(() => ({}));
+  return json({ ok: true, bot: me.username || null, webhook: hook });
+}
 
 async function serveManifest(env, code) {
   const meta = await batch.getMeta(env, code);

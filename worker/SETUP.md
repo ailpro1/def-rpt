@@ -69,7 +69,11 @@ copy one file.
     |---|---|---|
     | `ALLOWED_CHATS` | Text | your ID from step 7 |
     | `TG_TOKEN` | **Secret** | the token from step 5 |
-    | `TG_WEBHOOK_SECRET` | **Secret** | a long random string you make up, about 20 letters and numbers — **write it down**, you need it once in step 17 |
+    | `TG_WEBHOOK_SECRET` | **Secret** | a password you make up, about 20 characters — **write it down**, you need it once in step 17 |
+
+    **The webhook secret may only contain letters, numbers, `_` and `-`.**
+    Telegram refuses anything else — no spaces, no `!@#$%`. `TalonIntake2026xyz`
+    is fine; `Talon Intake!2026` is not.
 
     The two marked Secret are hidden after saving and cannot be read back, which
     is the point.
@@ -83,6 +87,9 @@ copy one file.
     ```
     https://insta-intake.YOUR-NAME.workers.dev/tg/register?secret=YOUR_WEBHOOK_SECRET
     ```
+
+    If anything is wrong it tells you exactly what, in plain words — a missing
+    token, a secret with an illegal character, or Telegram's own refusal.
 
     You should see something like:
 
@@ -128,8 +135,11 @@ copy one file.
 | What you see | What it usually means |
 |---|---|
 | The bot never replies to anything | `ALLOWED_CHATS` is not your ID (step 15), or step 17 was skipped |
-| Step 17 shows `{"error":"no"}` | the secret in the address does not match `TG_WEBHOOK_SECRET` exactly |
-| Step 17 shows an error mentioning the token | `TG_TOKEN` was pasted wrong — re-enter it in step 15 |
+| Step 17 complains about the secret not matching | the value after `secret=` in the address differs from `TG_WEBHOOK_SECRET` — check for a trailing space |
+| Step 17 says the secret can only contain letters, numbers, `_` and `-` | your secret has a space or punctuation in it. Change it in step 15, Deploy, then use the new value in step 17 |
+| Step 17 says the token is not set, or does not look like a bot token | `TG_TOKEN` is missing or was pasted with a space or line break — re-enter it in step 15 and Deploy |
+| Step 17 says "Telegram refused: … Unauthorized" | the token is a real shape but not a real token — re-copy it from BotFather |
+| Step 17 says "Telegram refused" something else | the message is Telegram's own words; send it to me and I'll decode it |
 | App says "That address answered, but it is not an intake bot" | the paste in step 13 did not deploy, or the address has a typo |
 | App says "No batch with code…" | that batch was already imported — a batch is deleted once it lands — or the code is mistyped |
 | Bot says "No batch open" | `/project` was never sent, or `/done` already ran |

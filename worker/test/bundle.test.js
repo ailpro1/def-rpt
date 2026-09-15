@@ -51,6 +51,41 @@ const hookCall = tgStub.sent.find((s) => s.method === 'setWebhook');
 check('setWebhook actually called', !!hookCall);
 check('setWebhook carries the secret', hookCall && hookCall.body.secret_token === 'shh');
 
+/* Setup goes wrong in a handful of ways. Each one has to name itself, because
+   this is the step done by hand and "server error" helps nobody. */
+
+const withEnv = async (patch, path = '/tg/register?secret=shh') => {
+  const res = await worker.fetch(new Request(ORIGIN + path), { ...env, ...patch }, ctx);
+  return { status: res.status, body: await res.json() };
+};
+
+const noToken = await withEnv({ TG_TOKEN: '' });
+check('missing token is named', noToken.status === 400 && /TG_TOKEN is not set/.test(noToken.body.error),
+  JSON.stringify(noToken));
+
+const badToken = await withEnv({ TG_TOKEN: 'not-a-token' });
+check('malformed token is named', badToken.status === 400 && /does not look like a bot token/.test(badToken.body.error),
+  JSON.stringify(badToken));
+
+const badSecretChars = await withEnv({ TG_WEBHOOK_SECRET: 'has spaces!' }, '/tg/register?secret=has spaces!');
+check('illegal secret characters are named',
+  badSecretChars.status === 400 && /letters, numbers/.test(badSecretChars.body.error),
+  JSON.stringify(badSecretChars));
+
+// Telegram itself refusing, which is what "server error" used to hide.
+const saved = tgStub.fetchImpl;
+globalThis.fetch = async (u, init) => {
+  if (String(u).includes('/setWebhook')) {
+    return new Response(JSON.stringify({ ok: false, description: 'Unauthorized' }), { status: 401 });
+  }
+  return saved(u, init);
+};
+const refused = await withEnv({});
+check('Telegram refusing is passed through',
+  refused.status === 502 && /Telegram refused: .*Unauthorized/.test(refused.body.error),
+  JSON.stringify(refused));
+globalThis.fetch = saved;
+
 /* ---------- a whole job, through the webhook ---------- */
 
 check('webhook without the secret header is refused',

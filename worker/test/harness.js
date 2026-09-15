@@ -53,7 +53,8 @@ export function fakeTelegram() {
 export function makeEnv(kv, extra = {}) {
   return {
     BATCHES: kv,
-    TG_TOKEN: 'test-token',
+    // Shaped like a real BotFather token, because /tg/register checks the shape.
+    TG_TOKEN: '8123456789:AAFtesttesttesttesttesttesttesttest',
     TG_WEBHOOK_SECRET: 'shh',
     ALLOWED_CHATS: '-100123',
     CAPTION_PX: '768',
