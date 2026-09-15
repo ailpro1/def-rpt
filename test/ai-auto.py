@@ -127,6 +127,31 @@ try:
               (not none['ok']) and 'Test connection' not in (none.get('error') or ''),
               str(none.get('error')))
 
+        # A key like Ahmad's: the model names match nothing in the built-in
+        # ladder — no "flash", no "pro", no "lite" — but they are real models.
+        ODD = ['antigravity-preview-05-2026', 'antigravity-preview-09-2026']
+        pg.evaluate(STUB, ODD)
+        pg.evaluate(SETTINGS, {'available': ODD})
+        pg.evaluate("() => { window.__calls = []; }")
+        odd = pg.evaluate(CAPTION)
+        print('  unfamiliar names ->', json.dumps(odd)[:180])
+        check('a key whose models are named nothing like the ladder still works',
+              odd['ok'], str(odd.get('error')))
+        check('it never asks for a model the key does not list',
+              all(not any(bad in c for bad in ['gemini-2.5-flash', 'gemini-2.5-flash-lite'])
+                  for c in odd['calls'] if ':generateContent' in c),
+              str(odd['calls']))
+
+        # And when it genuinely cannot, the message says what it tried.
+        pg.evaluate(STUB, [])
+        pg.evaluate(SETTINGS, {'available': ODD})
+        nope = pg.evaluate(CAPTION)
+        print('  none answer ->', json.dumps(nope)[:200])
+        check('the failure names the models it tried',
+              all(m in (nope.get('error') or '') for m in ODD), str(nope.get('error')))
+        check('the failure says how many the key has',
+              'usable model' in (nope.get('error') or ''), str(nope.get('error')))
+
         check('no page errors', not errs, str(errs))
         b.close()
 finally:

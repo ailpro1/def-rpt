@@ -219,7 +219,10 @@ export default async function renderSettings() {
         await set({ ai: { ...draft, key, enabled: true, available: models, checkedAt: Date.now() } });
         ui.alert('Connected', `${models.length} model(s) available. Answered on ${used}.`);
       } catch (err) {
-        await set({ ai: prev });
+        // Keep whatever was learned. Restoring the old settings wholesale threw
+        // away the model list that had just been fetched, so the next attempt
+        // started blind and failed the same way — for ever.
+        await set({ ai: { ...prev, key, available: draft.available || prev.available || [] } });
         ui.alert('Test failed', err.message);
       }
       label.textContent = 'Test connection';

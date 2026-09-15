@@ -67,16 +67,32 @@ export async function listModels() {
   return found;
 }
 
-/** Pick the closest model this key really has to the one we wanted. */
+const USABLE = (m) => !/embedding|aqa|imagen|image-generation|tts|native-audio|live/.test(m);
+
+/**
+ * Pick the closest model this key really has to the one we wanted.
+ *
+ * The one rule that matters: when we know what the key has, never hand back a
+ * name that is not on that list. Returning the name we wished for produces a
+ * 404 and an error quoting a model the user never chose, which is exactly how
+ * this used to fail.
+ */
 function resolve(wanted, available) {
-  if (!available || !available.length) return wanted;
-  if (available.includes(wanted)) return wanted;
+  const list = (available || []).filter(USABLE);
+  if (!list.length) return wanted;              // nothing known: the ladder is all we have
+  if (list.includes(wanted)) return wanted;
+
   const family = /lite/.test(wanted) ? 'lite' : /pro/.test(wanted) ? 'pro' : 'flash';
-  const usable = (m) => !/embedding|aqa|imagen|image-generation|tts|native-audio|live/.test(m);
-  const pick = (test) => available.find((m) => usable(m) && test(m));
-  if (family === 'lite') return pick((m) => /flash/.test(m) && /lite/.test(m)) || pick((m) => /flash/.test(m)) || pick(() => true) || wanted;
-  if (family === 'pro') return pick((m) => /pro/.test(m) && !/vision/.test(m)) || pick((m) => /flash/.test(m)) || pick(() => true) || wanted;
-  return pick((m) => /flash/.test(m) && !/lite/.test(m)) || pick((m) => /flash/.test(m)) || pick(() => true) || wanted;
+  const pick = (test) => list.find(test);
+  const chosen = family === 'lite'
+    ? pick((m) => /flash/.test(m) && /lite/.test(m)) || pick((m) => /flash/.test(m))
+    : family === 'pro'
+      ? pick((m) => /pro/.test(m) && !/vision/.test(m)) || pick((m) => /flash/.test(m))
+      : pick((m) => /flash/.test(m) && !/lite/.test(m)) || pick((m) => /flash/.test(m));
+
+  // Nothing familiar by name — a key whose models are all called something else
+  // still has models, so use one rather than a name we know is wrong.
+  return chosen || pick((m) => /gemini/.test(m)) || list[0];
 }
 
 export const isOnline = () => navigator.onLine;
@@ -179,6 +195,13 @@ async function run(task, parts, { system, maxTokens = 1024, temperature = 0.2 } 
   const attempt = async () => {
     const wanted = auto ? (LADDER[task] || LADDER.text) : [s.ai.model || DEFAULT_MODEL];
     const ladder = [...new Set(wanted.map((m) => resolve(m, available)))];
+    // On a key whose models are all named unfamiliarly, every rung can resolve
+    // to the same one. Walk on into the rest of what the key has rather than
+    // giving up after a single refusal.
+    if (auto) {
+      const rest = (available || []).filter(USABLE).filter((m) => !ladder.includes(m));
+      ladder.push(...rest.slice(0, 2));
+    }
     const ready = ladder.filter(isCool);
     const order = ready.length ? ready : ladder;   // everything cooling: try anyway
 
@@ -212,7 +235,10 @@ async function run(task, parts, { system, maxTokens = 1024, temperature = 0.2 } 
   }
 
   if (last && last.missing) {
-    throw new Error(`${last.message} This key may not have vision models enabled.`);
+    const tried = (order || []).join(', ');
+    const have = (available || []).filter(USABLE).length;
+    throw new Error(`None of the models this key offers would answer. Tried: ${tried}. `
+      + `The key lists ${have} usable model(s). ${last.message}`);
   }
   // One paced retry on the preferred model — free-tier limits are per minute.
   await sleep(4000);
