@@ -5,7 +5,7 @@ import { ingest, blobUrl } from '../image.js';
 import { exportBackup, importBackup, backupFilename, saveFile } from '../backup.js';
 import { BUILD } from '../build.js';
 import { ask, listModels, modelFor, DEFAULT_MODEL, aiEnabled } from '../assist.js';
-import { intakeEnabled, testConnection } from '../intake.js';
+import { intakeEnabled, testConnection, pushLibrary } from '../intake.js';
 
 export default async function renderSettings() {
   let s = await getSettings(true);
@@ -94,8 +94,27 @@ export default async function renderSettings() {
             }
           },
         })),
+      ui.group('Captions', [
+        ui.row({
+          title: 'Send caption library to the bot',
+          sub: 'So it writes captions in your wording, not the built-in list',
+          chevron: true,
+          onclick: async () => {
+            const secret = await ui.prompt('Bot secret',
+              'The TG_WEBHOOK_SECRET you set on the Worker. It is only used to '
+              + 'prove this is you, and is not stored.', '', { okLabel: 'Send' });
+            if (!secret) return;
+            try {
+              const r = await pushLibrary(secret.trim());
+              ui.toast(`Sent ${r.captions} captions in ${r.groups} groups`, 2600);
+            } catch (err) {
+              ui.alert('Could not send the library', err.message);
+            }
+          },
+        }),
+      ]),
       ui.h('div', { class: 'group-note',
-        text: 'Setting it up is written out in worker/README.md. Photos are collected by the bot, '
+        text: 'Setting it up is written out in worker/SETUP.md. Photos are collected by the bot, '
           + 'then pulled into a project from Projects > + > Import from Telegram.' }),
     );
     ui.sheet({

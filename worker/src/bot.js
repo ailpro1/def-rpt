@@ -99,9 +99,14 @@ async function filePhoto(env, msg, chatId, ctx) {
   if (!msg.photo && !asDocument) return;              // a PDF or a voice note is not a defect
 
   const big = asDocument ? null : tg.largest(msg.photo);
+  // Telegram ships several sizes. Keep the biggest for the report and note the
+  // one nearest a Gemini tile, so captioning never downloads more than it needs
+  // — a Worker cannot resize, but it can choose.
+  const small = asDocument ? null : tg.pickSize(msg.photo, Number(env.CAPTION_PX) || 768);
   const rec = await batch.addPhoto(env, meta, {
     id: msg.message_id,
     fileId: asDocument ? msg.document.file_id : big.file_id,
+    aiFileId: asDocument ? msg.document.file_id : (small || big).file_id,
     caption: (msg.caption || '').trim(),
     takenAt: sentAt(msg) * 1000,
     takenSource: asDocument ? 'file' : 'telegram',

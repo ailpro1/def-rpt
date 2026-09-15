@@ -6,6 +6,7 @@
 // payment method on the account — see worker/README.md.
 
 import { handleUpdate } from './bot.js';
+import { captionPending } from './caption.js';
 import * as tg from './telegram.js';
 import * as batch from './batch.js';
 
@@ -22,6 +23,14 @@ const cors = () => ({
 });
 
 export default {
+  /** The cron tick: caption a few photos, so a batch is written up by the time
+   * the office opens it. Small and often beats one long run. */
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(captionPending(env, Number(env.CAPTION_PER_TICK) || 6)
+      .then((r) => console.log('caption tick', JSON.stringify(r)))
+      .catch((err) => console.error('caption tick failed', err)));
+  },
+
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';
@@ -52,6 +61,26 @@ export default {
           return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
         }
         return register(env, url);
+      }
+
+      // Run the captioner by hand, for testing setup without waiting for a tick.
+      if (path === '/api/caption/run') {
+        if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
+          return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
+        }
+        return json(await captionPending(env, Number(url.searchParams.get('max')) || 6));
+      }
+
+      // The office's caption library, pushed from the app so the bot hints the
+      // model with the same wording the report prints.
+      if (path === '/api/library' && request.method === 'POST') {
+        if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
+          return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
+        }
+        const lib = await request.json().catch(() => null);
+        if (!Array.isArray(lib) || !lib.length) return json({ ok: false, error: 'Expected a caption library array.' }, 400);
+        await env.BATCHES.put('lib:captions', JSON.stringify(lib));
+        return json({ ok: true, groups: lib.length, captions: lib.reduce((n, g) => n + (g.items || []).length, 0) });
       }
 
       const manifestMatch = /^\/api\/batch\/([A-Z0-9]{4,16})$/.exec(path);

@@ -73,6 +73,7 @@ export async function addPhoto(env, meta, photo) {
   const rec = {
     id: photo.id,
     fileId: photo.fileId,
+    aiFileId: photo.aiFileId || photo.fileId,
     section: meta.section || 'GENERAL',
     caption: photo.caption || '',
     takenAt: photo.takenAt,

@@ -133,6 +133,45 @@ copy one file.
 
 ---
 
+## Turning on AI captions — 5 min, optional
+
+Without this the bot collects and sorts, and photos arrive with whatever caption
+the site team typed. With it, photos arrive already captioned and your job is to
+read and correct rather than write.
+
+It uses the same free Google AI Studio key the app uses. You can use the same
+key in both places.
+
+22. In the Worker: **Settings** → **Variables and Secrets** → Add
+    `GEMINI_KEY`, type **Secret**, value = your Google AI Studio key. **Deploy**.
+
+23. Give it a schedule so it works through the queue on its own:
+    **Settings** → **Trigger Events** (or **Triggers**) → **Add** → **Cron
+    Trigger** → every minute: `* * * * *`. Save.
+
+24. Test it without waiting. Forward a photo with no caption, then visit:
+
+    ```
+    https://YOUR-WORKER.workers.dev/api/caption/run?secret=YOUR_WEBHOOK_SECRET
+    ```
+
+    You should see `{"ok":true,"done":1,…}`. Send `/done` and import — the
+    caption is there.
+
+25. Optional but worth it: **Insta Report → Settings → Telegram Intake → Send
+    caption library to the bot**. It asks for the webhook secret once. Without
+    this the bot hints the model with the caption list built into it, which is
+    the app's defaults but not the entries you have added since.
+
+**What to expect.** Six photos a minute, so a 60-photo job is written up in
+about ten minutes. Import before it finishes and the screen tells you how many
+are still coming; you can wait, or import and use the app's own assistant.
+
+A caption the site team typed is never overwritten — they were standing in front
+of it. Captioning failures are not fatal: that photo simply arrives blank.
+
+---
+
 ## If something does not work
 
 | What you see | What it usually means |
@@ -148,6 +187,8 @@ copy one file.
 | App says "No batch with code…" | that batch was already imported — a batch is deleted once it lands — or the code is mistyped |
 | Bot says "No batch open" | `/project` was never sent, or `/done` already ran |
 | Photos are ignored, no tick | no batch open: send `/project <name>` first |
+| Captions never appear | `GEMINI_KEY` missing, or no cron trigger (steps 22–23). Visit `/api/caption/run?secret=…` — it says which |
+| `/api/caption/run` reports `failed` | its `errors` carry Google's own words. `429` is the free-tier rate limit and sorts itself out on later ticks |
 
 **Reading a refusal.** It carries a `check` block describing what is stored —
 `"TG_TOKEN":{"length":46,"hasColon":true,"charsAfterColon":35,"nonAscii":false,…}`

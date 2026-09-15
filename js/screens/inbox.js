@@ -257,8 +257,19 @@ export default async function renderInbox(initialCode = '') {
       .filter((s) => mapping.get(s.title) !== SKIP)
       .reduce((n, s) => n + s.photos.length, 0);
 
+    // Captioning runs on the bot after /done, so a batch fetched straight away
+    // can still be part-written. Nothing blocks on it — the count is shown and
+    // importing anyway is a normal choice.
+    const pending = Number(manifest.pending || 0);
+
     body.appendChild(ui.group('Batch', [
       ui.row({ title: manifest.project?.name || 'Unnamed', sub: `${total} photos · ${captioned} captioned` }),
+      ...(pending ? [ui.row({
+        title: `${pending} caption${pending === 1 ? '' : 's'} still being written`,
+        sub: 'Tap to check again — or import now and caption in the app',
+        iconName: 'sparkle', iconColor: 'var(--sys-indigo)',
+        onclick: pull,
+      })] : []),
       ui.row({
         title: 'Import into',
         sub: target === NEW_PROJECT ? `New project — ${projectName}` : (projects.find((p) => p.id === target) || {}).name,

@@ -10,14 +10,24 @@ kv_namespaces = [
   { binding = "BATCHES", id = "REPLACE_WITH_YOUR_KV_ID" },
 ]
 
+# Captioning runs a few photos at a time from this tick rather than in one long
+# pass, which keeps every invocation small and stays inside Gemini's free rate
+# limit by construction.
+[triggers]
+crons = ["* * * * *"]
+
 [vars]
 # Comma-separated Telegram chat ids allowed to file photos. Empty means the bot
 # accepts nothing, which is the right default for a bot anyone can find.
 ALLOWED_CHATS = ""
 # Width to hand the model when captioning. One Gemini image tile.
 CAPTION_PX = "768"
+# Photos captioned per tick. Higher finishes a batch sooner and spends the
+# free-tier rate limit faster.
+CAPTION_PER_TICK = "6"
 
 # Secrets are NOT set here — they would end up in git. Set them with:
 #   wrangler secret put TG_TOKEN
 #   wrangler secret put TG_WEBHOOK_SECRET
-#   wrangler secret put GEMINI_KEY        (stage 2 only)
+#   wrangler secret put GEMINI_KEY        (captions; without it the bot still
+#                                          collects, photos just arrive blank)
