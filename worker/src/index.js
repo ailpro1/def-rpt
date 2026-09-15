@@ -112,12 +112,19 @@ async function register(env, url) {
  */
 function describe(token, secret) {
   const colon = token.indexOf(':');
-  const common = (v) => ({
-    length: v.length,
-    hasWhitespace: /\s/.test(v),
-    hasQuotes: /['"]/.test(v),
-    nonAscii: /[^\x20-\x7E]/.test(v),
-  });
+  const common = (v) => {
+    // Name the odd characters by code point. A lookalike dash is invisible in a
+    // dashboard field and is the usual reason a token that looks perfect fails.
+    const odd = [...new Set([...v].filter((c) => c < ' ' || c > '~'))]
+      .map((c) => 'U+' + c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'));
+    return {
+      length: v.length,
+      hasWhitespace: /\s/.test(v),
+      hasQuotes: /['"]/.test(v),
+      nonAscii: odd.length > 0,
+      nonAsciiCharacters: odd,
+    };
+  };
   return {
     TG_TOKEN: {
       ...common(token),
@@ -133,8 +140,33 @@ function describe(token, secret) {
   };
 }
 
+// The characters that masquerade as a hyphen or an underscore in a token.
+const LOOKALIKES = {
+  '\u2010': 'a hyphen (U+2010) rather than a plain -',
+  '\u2011': 'a non-breaking hyphen (U+2011) rather than a plain -',
+  '\u2012': 'a figure dash (U+2012) rather than a plain -',
+  '\u2013': 'an en dash (\u2013) rather than a plain -',
+  '\u2014': 'an em dash (\u2014) rather than a plain -',
+  '\u2212': 'a minus sign (U+2212) rather than a plain -',
+  '\u200B': 'an invisible zero-width space',
+  '\u200E': 'an invisible left-to-right mark',
+  '\u200F': 'an invisible right-to-left mark',
+  '\uFEFF': 'an invisible byte-order mark',
+};
+
 /** Turn the common failures into the actual next action. */
 function hintFor(message, token, secret) {
+  // Check this before anything else: the value can be the perfect length and
+  // shape and still fail on one character that looks right and is not.
+  const odd = [...token].find((c) => c < ' ' || c > '~');
+  if (odd) {
+    const name = LOOKALIKES[odd];
+    return 'TG_TOKEN contains a character that is not a plain letter, digit, colon, underscore '
+      + `or hyphen${name ? ` \u2014 it has ${name}` : ''}. This happens when the token is copied `
+      + 'through something that auto-formats, turning a hyphen into a dash. Copy it again '
+      + 'straight from BotFather\u2019s message (/mybots > your bot > API Token), replace '
+      + 'TG_TOKEN, and Deploy.';
+  }
   if (/secret_token/i.test(message)) {
     return 'Change TG_WEBHOOK_SECRET to letters, numbers, underscore and hyphen only, '
       + 'Deploy, then visit this address again with the new value.';

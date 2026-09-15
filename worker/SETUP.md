@@ -15,7 +15,9 @@ copy one file.
 4. It asks for a **username**. It must end in `bot` and be unused, for example
    `talon_insta_intake_bot`.
 5. It replies with a **token** that looks like `8123456789:AAF…`.
-   **Copy it somewhere safe.** This is the password to your bot — anyone with it
+   **Copy it straight into Cloudflare in step 15 if you can.** Passing it through
+   a notes app, a document or a chat can silently turn the hyphens into dashes,
+   and Telegram then rejects it. This is the password to your bot — anyone with it
    can read and send your bot's messages. Don't put it in a chat, a shared
    document, or a message to Claude.
 6. Tap the `t.me/…` link in BotFather's reply, then press **Start**. This opens
@@ -139,7 +141,8 @@ copy one file.
 | Step 17 complains about the secret not matching | the value after `secret=` in the address differs from `TG_WEBHOOK_SECRET` — check for a trailing space |
 | Step 17 says the secret can only contain letters, numbers, `_` and `-` | your secret has a space or punctuation in it. Change it in step 15, Deploy, then use the new value in step 17 |
 | Step 17 says `TG_TOKEN is not set` | the variable is missing, or was added but not Deployed |
-| Step 17 says "Telegram refused: … Unauthorized" | the token is wrong. Re-copy it from BotFather: **/mybots** → your bot → **API Token** |
+| Step 17 says "Telegram refused: … Unauthorized" or "Not Found" | the token is wrong. Re-copy it from BotFather: **/mybots** → your bot → **API Token** |
+| …and the hint mentions a dash or an invisible character | the token picked up a lookalike character on the way — an en dash instead of a hyphen is the usual one. Copy it straight from BotFather's message rather than from a document or a note, and paste it into the field without editing |
 | Step 17 says "Telegram refused" anything else | it comes back with a `hint` telling you what to do, and a `check` describing what is stored — send me the whole reply if it is still unclear |
 
 A refusal includes a `check` block like

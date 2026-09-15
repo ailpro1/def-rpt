@@ -99,6 +99,23 @@ check('no credential appears anywhere in the reply',
   && !JSON.stringify(refused.body).includes('shh'),
   JSON.stringify(refused.body));
 
+// The real one from setup: right length, right shape, one lookalike character.
+refuseWith('Not Found');
+const dashed = await withEnv({ TG_TOKEN: '8123456789:AAFtesttesttesttest\u2013testtesttesttes' });
+check('a lookalike dash is named, not missed',
+  /en dash/.test(dashed.body.hint || ''), String(dashed.body.hint));
+check('the odd character is reported by code point',
+  (dashed.body.check.TG_TOKEN.nonAsciiCharacters || []).join(',') === 'U+2013',
+  JSON.stringify(dashed.body.check.TG_TOKEN));
+check('a right-shaped token is not mistaken for a good one',
+  dashed.body.check.TG_TOKEN.charsAfterColon === 35 && dashed.body.check.TG_TOKEN.nonAscii === true,
+  JSON.stringify(dashed.body.check.TG_TOKEN));
+
+const invisible = await withEnv({ TG_TOKEN: '8123456789:AAFtest\u200Btesttesttesttesttesttesttes' });
+check('an invisible character is named too',
+  /zero-width/.test(invisible.body.hint || ''), String(invisible.body.hint));
+
+refuseWith('Unauthorized');
 const swapped = await withEnv({ TG_TOKEN: 'vN9DCZGs40toh1eyg5VQ' });
 check('a value that is not token-shaped gets the swap hint',
   /not the token|swap/.test(swapped.body.hint || ''), String(swapped.body.hint));
