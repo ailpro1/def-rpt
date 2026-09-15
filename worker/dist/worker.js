@@ -438,23 +438,29 @@ async function cooling(env) {
   };
 }
 
-async function ask(env, model, imageB64, prompt) {
+/**
+ * One caption from one model.
+ *
+ * `plain` drops the two optional pieces some models refuse outright — the
+ * system instruction, which Google also calls the developer instruction, and
+ * the thinking budget. The rules are not lost: they go at the front of the
+ * prompt, which every model reads.
+ */
+async function ask(env, model, imageB64, prompt, plain = false) {
+  const parts = [{ inline_data: { mime_type: 'image/jpeg', data: imageB64 } }];
+  if (plain) parts.push({ text: `${SYSTEM}\n\n${prompt}` });
+  else parts.push({ text: prompt });
+
   const body = {
-    contents: [{
-      role: 'user',
-      parts: [
-        { inline_data: { mime_type: 'image/jpeg', data: imageB64 } },
-        { text: prompt },
-      ],
-    }],
+    contents: [{ role: 'user', parts }],
     generationConfig: {
       temperature: 0.1,
       maxOutputTokens: 32,
       // Flash reasons before answering out of the same budget, which can leave
       // a short caption with nothing left to say.
-      ...(/flash/i.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+      ...(!plain && /flash/i.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
     },
-    systemInstruction: { parts: [{ text: SYSTEM }] },
+    ...(plain ? {} : { systemInstruction: { parts: [{ text: SYSTEM }] } }),
   };
 
   const res = await fetch(`${HOST}/${encodeURIComponent(model)}:generateContent`, {
@@ -470,12 +476,16 @@ async function ask(env, model, imageB64, prompt) {
     err.status = res.status;
     // A rate limit or a model this key cannot see: step down the ladder.
     err.step = res.status === 429 || res.status === 404;
+    // The model is fine but will not take part of the request: same model,
+    // simpler request.
+    err.plain = res.status === 400 && !plain
+      && /instruction|thinking|not enabled|not supported|unsupported/i.test(detail);
     throw err;
   }
 
   const data = await res.json();
-  const parts = data.candidates?.[0]?.content?.parts || [];
-  return clean(parts.map((p) => p.text).filter(Boolean).join(''));
+  const reply = data.candidates?.[0]?.content?.parts || [];
+  return clean(reply.map((p) => p.text).filter(Boolean).join(''));
 }
 
 /* ------------------------- the pass ------------------------- */
@@ -527,17 +537,22 @@ async function captionOne(env, code, photo, lib, cool) {
   let last = null;
   for (const model of LADDER) {
     if (!cool.ready(model)) continue;
-    try {
-      const text = await ask(env, model, img, prompt);
-      if (text) {
-        await batch.updatePhoto(env, code, photo.id, { aiCaption: text, aiModel: model });
-        return text;
+    for (const plain of [false, true]) {
+      try {
+        const text = await ask(env, model, img, prompt, plain);
+        if (text) {
+          await batch.updatePhoto(env, code, photo.id, { aiCaption: text, aiModel: model });
+          return text;
+        }
+        last = new Error('empty reply');
+        break;
+      } catch (err) {
+        last = err;
+        if (err.step) await cool.rest(model);
+        if (err.plain) continue;    // same model, without the parts it refused
+        if (!err.step) return Promise.reject(err);   // a real error: no model helps
+        break;
       }
-      last = new Error('empty reply');
-    } catch (err) {
-      last = err;
-      if (err.step) await cool.rest(model);
-      if (!err.step) break;         // a real error: another model will not help
     }
   }
   throw last || new Error('no model available');

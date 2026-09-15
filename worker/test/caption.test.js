@@ -138,4 +138,45 @@ check('a pushed library is used instead',
   /A CAPTION ONLY THE OFFICE HAS/.test(gemini.calls[0].body.contents[0].parts[1].text),
   gemini.calls[0].body.contents[0].parts[1].text);
 
+/* ---------- a model that refuses a system instruction ---------- */
+/* The same key the app uses hit this on a real phone: the model is there, the
+   key is fine, and it answers 400 "Developer instruction is not enabled". */
+
+await env.BATCHES.delete('ai:cooldown');
+gemini.calls.length = 0;
+let refusedOnce = false;
+const plainStub = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  const u = String(url);
+  if (u.includes('generativelanguage')) {
+    const body = JSON.parse(init.body);
+    gemini.calls.push({ model: /models\/([^:]+):/.exec(u)[1], body });
+    if (body.systemInstruction) {
+      refusedOnce = true;
+      return new Response(JSON.stringify({ error: {
+        message: 'Developer instruction is not enabled for models/x' } }), { status: 400 });
+    }
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: 'CHIPPED TILE' }] } }],
+    }), { status: 200 });
+  }
+  return tgStub.fetchImpl(url, init);
+};
+
+await feed(cmd('/sec BATH 3'));
+await feed(photo());
+const picky = await captionPending(env, 1);
+check('a model refusing the instruction still produces a caption',
+  picky.done === 1, JSON.stringify(picky));
+check('it was refused once, then retried without it',
+  refusedOnce && gemini.calls.some((c) => !c.body.systemInstruction),
+  JSON.stringify(gemini.calls.map((c) => Object.keys(c.body))));
+const plainBody = gemini.calls.find((c) => !c.body.systemInstruction).body;
+const sentText = plainBody.contents[0].parts.map((p) => p.text).filter(Boolean).join('');
+check('the rules travel in the prompt instead', /UPPERCASE, 4-7 words/.test(sentText),
+  sentText.slice(0, 80));
+check('the photo is still attached',
+  plainBody.contents[0].parts.some((p) => p.inline_data));
+globalThis.fetch = plainStub;
+
 report('captioning');

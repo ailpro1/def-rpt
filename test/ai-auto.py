@@ -42,6 +42,14 @@ STUB = """(models) => {
         return new Response(JSON.stringify({ error: { message: `models/${name} is not found` } }),
           { status: 404 });
       }
+      const body = JSON.parse(init.body);
+      window.__bodies = window.__bodies || [];
+      window.__bodies.push(body);
+      // Some models refuse the system instruction outright, as Ahmad's do.
+      if (window.__refuseSystem && body.systemInstruction) {
+        return new Response(JSON.stringify({ error: {
+          message: `Developer instruction is not enabled for models/${name}` } }), { status: 400 });
+      }
       return new Response(JSON.stringify({
         candidates: [{ content: { parts: [{ text: 'UNFILLED GROUT' }] } }],
       }), { status: 200 });
@@ -151,6 +159,30 @@ try:
               all(m in (nope.get('error') or '') for m in ODD), str(nope.get('error')))
         check('the failure says how many the key has',
               'usable model' in (nope.get('error') or ''), str(nope.get('error')))
+
+        # The real failure from the phone: the model exists and the key is fine,
+        # but it will not accept a system instruction.
+        pg.evaluate(STUB, ODD)
+        pg.evaluate("() => { window.__refuseSystem = true; window.__calls = []; window.__bodies = []; }")
+        pg.evaluate(SETTINGS, {'available': ODD})
+        picky = pg.evaluate(CAPTION)
+        print('  refuses system ->', json.dumps(picky)[:180])
+        check('a model that refuses a system instruction still captions',
+              picky['ok'], str(picky.get('error')))
+
+        bodies = pg.evaluate("() => window.__bodies")
+        check('it tried the same model again without the instruction',
+              any('systemInstruction' in b for b in bodies)
+              and any('systemInstruction' not in b for b in bodies),
+              str([sorted(b.keys()) for b in bodies]))
+        plain = [b for b in bodies if 'systemInstruction' not in b][-1]
+        first_text = next((p.get('text') for p in plain['contents'][0]['parts'] if 'text' in p), '')
+        check('the rules are moved into the prompt, not dropped',
+              'UPPERCASE' in first_text, first_text[:80])
+        check('the photo is still sent',
+              any('inline_data' in p for p in plain['contents'][0]['parts']),
+              str([sorted(p.keys()) for p in plain['contents'][0]['parts']]))
+        pg.evaluate("() => { window.__refuseSystem = false; }")
 
         check('no page errors', not errs, str(errs))
         b.close()

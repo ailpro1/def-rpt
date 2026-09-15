@@ -104,23 +104,40 @@ export async function aiReady() {
 }
 
 class Retryable extends Error {
-  constructor(message, { cooldown = false, missing = false } = {}) {
+  constructor(message, { cooldown = false, missing = false, plain = false } = {}) {
     super(message);
     this.cooldown = cooldown;
     this.missing = missing;
+    // The model is there and the key is fine, but it will not take part of the
+    // request — try it again with the optional pieces left out.
+    this.plain = plain;
   }
 }
 
-/** One generateContent call against a named model. */
-async function callModel(model, key, parts, { system, maxTokens, temperature }) {
+/**
+ * One generateContent call against a named model.
+ *
+ * `plain` drops the two optional pieces some models refuse: the system
+ * instruction (Google also calls it the developer instruction) and the thinking
+ * budget. The instruction is not lost — it is prepended to the prompt, which
+ * every model accepts.
+ */
+async function callModel(model, key, parts, { system, maxTokens, temperature, plain = false }) {
   const generationConfig = { temperature, maxOutputTokens: maxTokens };
   // 2.5 Flash reasons before answering and those tokens come out of the same
   // budget, which can leave a short caption request with nothing left to say.
   // Captions do not need it, so turn it off where the model allows it.
-  if (/flash/i.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  if (!plain && /flash/i.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
 
-  const body = { contents: [{ role: 'user', parts }], generationConfig };
-  if (system) body.systemInstruction = { parts: [{ text: system }] };
+  let sent = parts;
+  const body = { contents: [{ role: 'user', parts: sent }], generationConfig };
+  if (system && !plain) {
+    body.systemInstruction = { parts: [{ text: system }] };
+  } else if (system) {
+    // Rules first, then the request, in the one field every model reads.
+    sent = [{ text: system }, ...parts];
+    body.contents = [{ role: 'user', parts: sent }];
+  }
 
   let res;
   try {
@@ -142,6 +159,12 @@ async function callModel(model, key, parts, { system, maxTokens, temperature }) 
     }
     if (res.status >= 500) throw new Retryable('Google AI Studio is unavailable right now.');
     if (res.status === 400 && /API key not valid/i.test(detail)) throw new Error('That API key was rejected. Check it in Settings > AI Assistant.');
+    // "Developer instruction is not enabled for models/x", "thinking is not
+    // supported", and friends: the request shape, not the key or the model.
+    if (res.status === 400 && !plain
+        && /instruction|thinking|not enabled|not supported|unsupported/i.test(detail)) {
+      throw new Retryable(`${model} will not take part of that request.`, { plain: true });
+    }
     if (res.status === 403) throw new Error('The API key is not authorised for this request.');
     throw new Error(`AI request failed (${res.status}). ${detail.slice(0, 160)}`);
   }
@@ -207,12 +230,17 @@ async function run(task, parts, { system, maxTokens = 1024, temperature = 0.2 } 
 
     let last = null;
     for (const model of order) {
-      try {
-        return { text: await callModel(model, key, parts, { system, maxTokens, temperature }) };
-      } catch (err) {
-        if (!(err instanceof Retryable)) throw err;
-        if (err.cooldown) cooling.set(model, Date.now() + COOLDOWN_MS);
-        last = err;
+      for (const plain of [false, true]) {
+        try {
+          return { text: await callModel(model, key, parts, { system, maxTokens, temperature, plain }) };
+        } catch (err) {
+          if (!(err instanceof Retryable)) throw err;
+          if (err.cooldown) cooling.set(model, Date.now() + COOLDOWN_MS);
+          last = err;
+          // Only a refusal of the request shape is worth a second go at the
+          // same model; anything else moves on.
+          if (!err.plain) break;
+        }
       }
     }
     return { failed: last, order };
