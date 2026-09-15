@@ -145,18 +145,44 @@ key in both places.
 22. In the Worker: **Settings** → **Variables and Secrets** → Add
     `GEMINI_KEY`, type **Secret**, value = your Google AI Studio key. **Deploy**.
 
-23. Give it a schedule so it works through the queue on its own:
-    **Settings** → **Trigger Events** (or **Triggers**) → **Add** → **Cron
-    Trigger** → every minute: `* * * * *`. Save.
+23. **Give the Worker an alarm clock.**
 
-24. Test it without waiting. Forward a photo with no caption, then visit:
+    Up to now the Worker only wakes when something calls it — a Telegram
+    message, or your app fetching a batch. Captioning happens *after* the photos
+    arrive, so on its own nothing would ever wake it up to do that work. A cron
+    trigger is Cloudflare running it on a schedule regardless.
+
+    **Settings** → **Trigger Events** (or **Triggers**) → **Add** → **Cron
+    Trigger**, and enter:
+
+    ```
+    * * * * *
+    ```
+
+    That is how "every minute" is written — five fields for minute, hour, day,
+    month and weekday, and a `*` means "every one of these". Save.
+
+    Each wake-up it captions up to six photos, then goes back to sleep. Skip
+    this step and photos will arrive, but never get captioned.
+
+24. **Check it works, without waiting for the alarm.** Optional — this just
+    turns "is it working?" into a five-second answer.
+
+    Forward a photo with **no** caption, then visit this address (the same
+    secret as step 17):
 
     ```
     https://YOUR-WORKER.workers.dev/api/caption/run?secret=YOUR_WEBHOOK_SECRET
     ```
 
-    You should see `{"ok":true,"done":1,…}`. Send `/done` and import — the
-    caption is there.
+    It means "do the captioning now, and tell me what happened". You should see:
+
+    ```json
+    {"ok":true,"done":1,"failed":0,"remaining":0,"errors":[]}
+    ```
+
+    `done: 1` is one photo captioned. If the key is missing or wrong it says so
+    instead of pretending. Then send `/done` and import — the caption is there.
 
 25. Optional but worth it: **Insta Report → Settings → Telegram Intake → Send
     caption library to the bot**. It asks for the webhook secret once. Without
@@ -187,7 +213,7 @@ of it. Captioning failures are not fatal: that photo simply arrives blank.
 | App says "No batch with code…" | that batch was already imported — a batch is deleted once it lands — or the code is mistyped |
 | Bot says "No batch open" | `/project` was never sent, or `/done` already ran |
 | Photos are ignored, no tick | no batch open: send `/project <name>` first |
-| Captions never appear | `GEMINI_KEY` missing, or no cron trigger (steps 22–23). Visit `/api/caption/run?secret=…` — it says which |
+| Captions never appear | `GEMINI_KEY` missing, or no cron trigger (steps 22–23). Visit `/api/caption/run?secret=…` — if that works but nothing happens on its own, the alarm clock in step 23 is what is missing |
 | `/api/caption/run` reports `failed` | its `errors` carry Google's own words. `429` is the free-tier rate limit and sorts itself out on later ticks |
 
 **Reading a refusal.** It carries a `check` block describing what is stored —
