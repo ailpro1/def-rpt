@@ -144,16 +144,18 @@ copy one file.
 | Step 17 says "Telegram refused: … Unauthorized" or "Not Found" | the token is wrong. Re-copy it from BotFather: **/mybots** → your bot → **API Token** |
 | …and the hint mentions a dash or an invisible character | the token picked up a lookalike character on the way — an en dash instead of a hyphen is the usual one. Copy it straight from BotFather's message rather than from a document or a note, and paste it into the field without editing |
 | Step 17 says "Telegram refused" anything else | it comes back with a `hint` telling you what to do, and a `check` describing what is stored — send me the whole reply if it is still unclear |
-
-A refusal includes a `check` block like
-`"TG_TOKEN":{"length":46,"hasColon":true,"charsAfterColon":35,…}`. It describes
-the *shape* of what is stored, never the value, so it is safe to share when
-asking for help. Look there for a surprising length, `hasWhitespace: true`, or
-`hasQuotes: true` — all signs the paste picked up something extra.
 | App says "That address answered, but it is not an intake bot" | the paste in step 13 did not deploy, or the address has a typo |
 | App says "No batch with code…" | that batch was already imported — a batch is deleted once it lands — or the code is mistyped |
 | Bot says "No batch open" | `/project` was never sent, or `/done` already ran |
 | Photos are ignored, no tick | no batch open: send `/project <name>` first |
+
+**Reading a refusal.** It carries a `check` block describing what is stored —
+`"TG_TOKEN":{"length":46,"hasColon":true,"charsAfterColon":35,"nonAscii":false,…}`
+— never the values themselves, so it is safe to share when asking for help.
+A healthy token reads 46 long, `hasColon: true`, 35 characters after the colon,
+and everything else false. `nonAscii: true` is the one that catches people out:
+the token looks perfect but carries a lookalike dash. `nonAsciiCharacters` names
+it.
 
 Live logs help: in the Worker, open **Logs** → **Begin log stream**, then send
 the bot a message and watch what arrives.
