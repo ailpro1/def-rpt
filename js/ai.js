@@ -8,7 +8,7 @@
 //      prompts, capped replies, batching).
 //   2. Picking the cheapest model that can do the job, and stepping to another
 //      one by itself when a model is rate limited, missing or unhelpful.
-import { getSettings } from './store.js';
+import { getSettings, saveSettings } from './store.js';
 import { rankCaptions } from './captions.js';
 import { aiCopy } from './image.js';
 import { DEFAULT_MODEL } from './assist.js';
@@ -148,6 +148,24 @@ async function callModel(model, key, parts, { system, maxTokens, temperature }) 
  * limit, a missing model or an unusable reply, then waits once and retries.
  * A model the user has pinned is used on its own.
  */
+/**
+ * What this key actually has, remembered between runs. Model names change and
+ * differ by key, so auto mode cannot work from the hardcoded ladder alone — and
+ * asking the user to go and press Test connection is the app making its own
+ * problem someone else's.
+ */
+async function knownModels(s, { refresh = false } = {}) {
+  if (!refresh && s.ai.available && s.ai.available.length) return s.ai.available;
+  try {
+    const found = await listModels();
+    if (found.length) {
+      await saveSettings({ ai: { ...s.ai, available: found, checkedAt: Date.now() } });
+      return found;
+    }
+  } catch { /* offline or rejected: fall back to the ladder as written */ }
+  return s.ai.available || [];
+}
+
 async function run(task, parts, { system, maxTokens = 1024, temperature = 0.2 } = {}) {
   const s = await getSettings();
   const key = s.ai?.key;
@@ -155,25 +173,46 @@ async function run(task, parts, { system, maxTokens = 1024, temperature = 0.2 } 
   if (!isOnline()) throw new Error('Offline — AI features need a connection.');
 
   const auto = s.ai.auto !== false;
-  const available = s.ai.available;
-  const wanted = auto ? (LADDER[task] || LADDER.text) : [s.ai.model || DEFAULT_MODEL];
-  const ladder = [...new Set(wanted.map((m) => resolve(m, available)))];
-  const ready = ladder.filter(isCool);
-  const order = ready.length ? ready : ladder;   // everything cooling: try anyway
+  // In auto mode, find out what the key has before guessing at names.
+  let available = auto ? await knownModels(s) : s.ai.available;
 
-  let last = null;
-  for (const model of order) {
-    try {
-      return await callModel(model, key, parts, { system, maxTokens, temperature });
-    } catch (err) {
-      if (!(err instanceof Retryable)) throw err;
-      if (err.cooldown) cooling.set(model, Date.now() + COOLDOWN_MS);
-      last = err;
+  const attempt = async () => {
+    const wanted = auto ? (LADDER[task] || LADDER.text) : [s.ai.model || DEFAULT_MODEL];
+    const ladder = [...new Set(wanted.map((m) => resolve(m, available)))];
+    const ready = ladder.filter(isCool);
+    const order = ready.length ? ready : ladder;   // everything cooling: try anyway
+
+    let last = null;
+    for (const model of order) {
+      try {
+        return { text: await callModel(model, key, parts, { system, maxTokens, temperature }) };
+      } catch (err) {
+        if (!(err instanceof Retryable)) throw err;
+        if (err.cooldown) cooling.set(model, Date.now() + COOLDOWN_MS);
+        last = err;
+      }
+    }
+    return { failed: last, order };
+  };
+
+  let { text, failed: last, order } = await attempt();
+  if (text !== undefined) return text;
+
+  // Every model on the ladder was missing: the remembered list is out of date,
+  // or was never fetched. Refresh it and try once more rather than handing the
+  // user an instruction.
+  if (auto && last && last.missing) {
+    const fresh = await knownModels(s, { refresh: true });
+    if (fresh.length && fresh.join() !== (available || []).join()) {
+      available = fresh;
+      cooling.clear();
+      ({ text, failed: last, order } = await attempt());
+      if (text !== undefined) return text;
     }
   }
-  // A model that does not exist will not start existing in four seconds.
+
   if (last && last.missing) {
-    throw new Error(`${last.message} Tap Test connection to refresh the model list for this key.`);
+    throw new Error(`${last.message} This key may not have vision models enabled.`);
   }
   // One paced retry on the preferred model — free-tier limits are per minute.
   await sleep(4000);

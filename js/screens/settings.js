@@ -171,7 +171,8 @@ export default async function renderSettings() {
       const list = (draft.available || []).filter((m) => !/embedding|aqa|imagen|image-generation|tts|native-audio|live/.test(m));
       if (!list.length) {
         presets.appendChild(ui.h('div', { class: 'hint', style: { padding: '0 4px' },
-          text: 'Tap Test connection to load the models available to this key.' }));
+          text: 'Only needed if you turn off automatic choice \u2014 tap Test connection to '
+            + 'list this key\u2019s models. On auto, the app looks them up itself.' }));
         return;
       }
       list.forEach((m) => presets.appendChild(ui.h('button', {
@@ -191,7 +192,8 @@ export default async function renderSettings() {
     };
     const autoRow = ui.switchRow('Choose model automatically', draft.auto !== false,
       (v) => { draft.auto = v; syncAuto(); },
-      'Cheapest first, matched to what your key has; falls back on rate limits');
+      'Cheapest first, matched to what your key has; falls back on rate limits. '
+      + 'Finds the models itself \u2014 no need to test first');
 
     const testBtn = ui.h('button', { class: 'btn tinted wide' }, ui.h('span', { text: 'Test connection' }));
     testBtn.onclick = async () => {
@@ -386,7 +388,7 @@ export default async function renderSettings() {
         title: 'AI assistant',
         sub: s.ai.enabled && s.ai.key
           ? (s.ai.auto !== false
-            ? `Google AI Studio · auto${(s.ai.available || []).length ? ` · ${s.ai.available.length} models` : ' · not tested yet'}`
+            ? `Google AI Studio · auto${(s.ai.available || []).length ? ` · ${s.ai.available.length} models` : ''}`
             : `Google AI Studio · ${s.ai.model}`)
           : 'Google AI Studio (Gemini)',
         value: s.ai.enabled && s.ai.key ? 'On' : 'Off',
