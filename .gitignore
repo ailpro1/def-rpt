@@ -3,4 +3,6 @@ package-lock.json
 *.tmp.mjs
 .DS_Store
 
-dist/
+# The PWA build output, at the repo root only. worker/dist/worker.js is the
+# file you paste into Cloudflare, so it is committed on purpose.
+/dist/
