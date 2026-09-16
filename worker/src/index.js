@@ -68,7 +68,10 @@ export default {
         if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
           return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
         }
-        return json(await captionPending(env, Number(url.searchParams.get('max')) || 6));
+        // ?rescan=1 finds work by scanning every key, for when the queue has
+        // been lost. It costs list operations, so it is never automatic.
+        return json(await captionPending(env, Number(url.searchParams.get('max')) || 6,
+          { rescan: url.searchParams.get('rescan') === '1' }));
       }
 
       // The office's caption library, pushed from the app so the bot hints the

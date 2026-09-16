@@ -170,19 +170,29 @@ async function ask(env, model, imageB64, prompt, plain = false) {
  * Caption up to `max` photos that have none. Returns what it did, which is what
  * the cron log and the manual trigger report.
  */
-export async function captionPending(env, max = 6) {
+export async function captionPending(env, max = 6, { rescan = false } = {}) {
   if (!env.GEMINI_KEY) return { ok: false, reason: 'GEMINI_KEY is not set', done: 0 };
+
+  // One read, and usually the end of it. This runs every couple of minutes
+  // forever, so an idle tick has to cost as close to nothing as possible — in
+  // particular it must not list keys, which is the scarcest free allowance.
+  const codes = rescan ? await openCodes(env) : await batch.queueList(env);
+  if (!codes.length) return { ok: true, done: 0, failed: 0, remaining: 0, idle: true, errors: [] };
 
   const lib = await library(env);
   const cool = await cooling(env);
   const out = { ok: true, done: 0, failed: 0, remaining: 0, errors: [] };
 
-  for (const code of await openCodes(env)) {
+  for (const code of codes) {
     // Summaries first, so finding the handful still to do costs one request
     // rather than one per photo. Only the ones actually being captioned are
     // then read in full.
     const waiting = (await batch.listSummaries(env, code)).filter((p) => !p.tried);
-    if (!waiting.length) continue;
+    if (!waiting.length) {
+      // Nothing left here: take it off the queue so later ticks cost one read.
+      await batch.queueRemove(env, code);
+      continue;
+    }
 
     for (const s of waiting) {
       if (out.done + out.failed >= max) { out.remaining++; continue; }
@@ -234,7 +244,7 @@ async function captionOne(env, code, photo, lib, cool) {
   throw last || new Error('no model available');
 }
 
-/** Every batch that still exists, newest first. */
+/** Every batch that still exists — the slow way, for a rescan. */
 async function openCodes(env) {
   const codes = [];
   let cursor;

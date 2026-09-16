@@ -13,8 +13,12 @@ kv_namespaces = [
 # Captioning runs a few photos at a time from this tick rather than in one long
 # pass, which keeps every invocation small and stays inside Gemini's free rate
 # limit by construction.
+#
+# Every two minutes, not every minute: 720 firings a day leaves room under the
+# free allowance for key listings even if something later starts listing on the
+# idle path. As written an idle tick reads one key and does not list at all.
 [triggers]
-crons = ["* * * * *"]
+crons = ["*/2 * * * *"]
 
 [vars]
 # Comma-separated Telegram chat ids allowed to file photos. Empty means the bot
@@ -24,7 +28,7 @@ ALLOWED_CHATS = ""
 CAPTION_PX = "768"
 # Photos captioned per tick. Higher finishes a batch sooner and spends the
 # free-tier rate limit faster.
-CAPTION_PER_TICK = "6"
+CAPTION_PER_TICK = "10"
 
 # Secrets are NOT set here — they would end up in git. Set them with:
 #   wrangler secret put TG_TOKEN

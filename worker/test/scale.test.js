@@ -84,6 +84,33 @@ check('claiming stays under the ceiling', claim.spent < CEILING, String(claim.sp
 check('a claimed code stops working immediately',
   (await req(`/api/batch/${code}`)).status === 404);
 
+/* ---------- what a day of doing nothing costs ---------- */
+/*
+ * The captioning tick fires unattended, for ever. Cloudflare's free plan allows
+ * 1000 key listings a day, and a tick that lists to ask "is there work?" spends
+ * one every time — which blocked a real account over a weekend in which nobody
+ * touched the bot. An idle tick must not list at all.
+ */
+
+const { captionPending } = await import('../src/caption.js');
+const LIST_BUDGET_PER_DAY = 1000;
+
+const idle = { reads: 0, lists: 0 };
+{
+  const before = { reads: kv.reads, lists: kv.lists };
+  const r = await captionPending({ ...env, GEMINI_KEY: 'k' }, 10);
+  idle.reads = kv.reads - before.reads;
+  idle.lists = kv.lists - before.lists;
+  check('an idle tick reports itself idle', r.idle === true, JSON.stringify(r));
+}
+check('an idle tick lists nothing at all', idle.lists === 0, `${idle.lists} listings`);
+check('an idle tick reads once', idle.reads <= 1, `${idle.reads} reads`);
+
+const everyTwoMinutes = (24 * 60) / 2;
+check('a day of idle ticks stays inside the free listing allowance',
+  idle.lists * everyTwoMinutes < LIST_BUDGET_PER_DAY,
+  `${idle.lists * everyTwoMinutes} a day against ${LIST_BUDGET_PER_DAY}`);
+
 report(`scale (${PHOTOS} photos)`);
 console.log('   cost in requests: '
   + [first, last, mf, one, list, done, claim].map((c) => `${c.label} ${c.spent}`).join(' · '));

@@ -25,6 +25,33 @@ const CODE_LEN = 8;
 const TTL_DAYS = 14;
 const TTL_SECONDS = TTL_DAYS * 86400;
 
+// Which batches still have photos waiting for a caption. The captioning tick
+// reads this one key and stops there when it is empty — listing keys to find
+// that out costs a list operation every minute of every day, which is how a
+// bot that nobody touched used up a month's free allowance in a weekend.
+const QUEUE_KEY = 'queue:pending';
+
+async function queueList(env) {
+  const raw = await env.BATCHES.get(QUEUE_KEY);
+  try { return raw ? JSON.parse(raw) : []; } catch { return []; }
+}
+
+async function queueAdd(env, code) {
+  const codes = await queueList(env);
+  if (codes.includes(code)) return codes;              // already queued: no write
+  const next = [...codes, code];
+  await env.BATCHES.put(QUEUE_KEY, JSON.stringify(next), { expirationTtl: TTL_SECONDS });
+  return next;
+}
+
+async function queueRemove(env, code) {
+  const codes = await queueList(env);
+  if (!codes.includes(code)) return codes;
+  const next = codes.filter((c) => c !== code);
+  await env.BATCHES.put(QUEUE_KEY, JSON.stringify(next), { expirationTtl: TTL_SECONDS });
+  return next;
+}
+
 const metaKey = (code) => `batch:${code}:meta`;
 const photoKey = (code, id) => `batch:${code}:p:${String(id).padStart(12, '0')}`;
 const chatKey = (chatId) => `chat:${chatId}`;
@@ -121,6 +148,8 @@ async function addPhoto(env, meta, photo) {
     aiCaption: undefined,
   };
   await putPhoto(env, meta.code, rec);
+  // Only a photo that needs a caption puts its batch in the queue.
+  if (!rec.caption) await queueAdd(env, meta.code);
   return rec;
 }
 
@@ -191,6 +220,7 @@ async function closeBatch(env, meta) {
  * swept up by KV itself instead of costing this request a read apiece.
  */
 async function deleteBatch(env, meta, budget = 40) {
+  await queueRemove(env, meta.code);
   await env.BATCHES.delete(metaKey(meta.code));
   await env.BATCHES.delete(chatKey(meta.chatId));
   const summaries = await listSummaries(env, meta.code);
@@ -242,7 +272,7 @@ function tally(photos) {
   return [...counts.entries()];
 }
 
-const batch = { newCode, openBatch, getMeta, activeBatch, setSection, summary, addPhoto, listSummaries, getPhoto, listPhotos, updatePhoto, dropPhoto, closeBatch, deleteBatch, manifest, tally, TTL_SECONDS, putMeta };
+const batch = { queueList, queueAdd, queueRemove, newCode, openBatch, getMeta, activeBatch, setSection, summary, addPhoto, listSummaries, getPhoto, listPhotos, updatePhoto, dropPhoto, closeBatch, deleteBatch, manifest, tally, TTL_SECONDS, putMeta };
 
 /* ---------- telegram.js ---------- */
 
@@ -494,19 +524,29 @@ async function ask(env, model, imageB64, prompt, plain = false) {
  * Caption up to `max` photos that have none. Returns what it did, which is what
  * the cron log and the manual trigger report.
  */
-async function captionPending(env, max = 6) {
+async function captionPending(env, max = 6, { rescan = false } = {}) {
   if (!env.GEMINI_KEY) return { ok: false, reason: 'GEMINI_KEY is not set', done: 0 };
+
+  // One read, and usually the end of it. This runs every couple of minutes
+  // forever, so an idle tick has to cost as close to nothing as possible — in
+  // particular it must not list keys, which is the scarcest free allowance.
+  const codes = rescan ? await openCodes(env) : await batch.queueList(env);
+  if (!codes.length) return { ok: true, done: 0, failed: 0, remaining: 0, idle: true, errors: [] };
 
   const lib = await library(env);
   const cool = await cooling(env);
   const out = { ok: true, done: 0, failed: 0, remaining: 0, errors: [] };
 
-  for (const code of await openCodes(env)) {
+  for (const code of codes) {
     // Summaries first, so finding the handful still to do costs one request
     // rather than one per photo. Only the ones actually being captioned are
     // then read in full.
     const waiting = (await batch.listSummaries(env, code)).filter((p) => !p.tried);
-    if (!waiting.length) continue;
+    if (!waiting.length) {
+      // Nothing left here: take it off the queue so later ticks cost one read.
+      await batch.queueRemove(env, code);
+      continue;
+    }
 
     for (const s of waiting) {
       if (out.done + out.failed >= max) { out.remaining++; continue; }
@@ -558,7 +598,7 @@ async function captionOne(env, code, photo, lib, cool) {
   throw last || new Error('no model available');
 }
 
-/** Every batch that still exists, newest first. */
+/** Every batch that still exists — the slow way, for a rescan. */
 async function openCodes(env) {
   const codes = [];
   let cursor;
@@ -852,7 +892,10 @@ export default {
         if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
           return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
         }
-        return json(await captionPending(env, Number(url.searchParams.get('max')) || 6));
+        // ?rescan=1 finds work by scanning every key, for when the queue has
+        // been lost. It costs list operations, so it is never automatic.
+        return json(await captionPending(env, Number(url.searchParams.get('max')) || 6,
+          { rescan: url.searchParams.get('rescan') === '1' }));
       }
 
       // The office's caption library, pushed from the app so the bot hints the

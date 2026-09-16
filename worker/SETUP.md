@@ -156,14 +156,22 @@ key in both places.
     Trigger**, and enter:
 
     ```
-    * * * * *
+    */2 * * * *
     ```
 
-    That is how "every minute" is written — five fields for minute, hour, day,
-    month and weekday, and a `*` means "every one of these". Save.
+    That is "every two minutes" — five fields for minute, hour, day, month and
+    weekday; `*` means "every one of these" and `*/2` means "every second one".
+    Save.
 
-    Each wake-up it captions up to six photos, then goes back to sleep. Skip
+    Each wake-up it captions up to ten photos, then goes back to sleep. Skip
     this step and photos will arrive, but never get captioned.
+
+    **Do not set this to every minute.** A tick that finds nothing still costs
+    the account something, and the free plan's smallest allowance is 1,000 key
+    listings a day. Every two minutes is 720 firings — comfortable. Every
+    minute is 1,440, and an earlier version that also searched for work on each
+    tick had a real account's storage blocked over a weekend in which nobody
+    touched the bot.
 
 24. **Check it works, without waiting for the alarm.** Optional — this just
     turns "is it working?" into a five-second answer.
@@ -232,6 +240,8 @@ reclaims the tab. Nothing is lost and nothing needs undoing:
 | Fewer photos imported than you sent | run the import again with the same code — photos already in are skipped, so only the missing ones come down. If the code no longer works, the bot never received the rest: check `/list` against what you forwarded |
 | "Could not reach the intake bot" on a big batch | the Worker is out of date. Re-paste `worker/dist/worker.js` (step 13) and Deploy. Before this fix, a large batch cost the Worker one storage read per photo on every request, and Cloudflare cut it off — the browser reports that as unreachable, because the error page it gets back carries no CORS headers |
 | Captions never appear | `GEMINI_KEY` missing, or no cron trigger (steps 22–23). Visit `/api/caption/run?secret=…` — if that works but nothing happens on its own, the alarm clock in step 23 is what is missing |
+| Cloudflare emails that KV is blocked for exceeding a free limit | the allowance resets daily. Check the cron is `*/2 * * * *` and not every minute, and that the Worker is up to date — an idle tick should read one key and list none. The bot keeps collecting photos meanwhile; only captioning pauses |
+| Captions missed on an older batch | the queue of work is kept in one key. If it is ever lost, `/api/caption/run?secret=…&rescan=1` searches every batch instead. It costs listings, so it is never automatic |
 | `/api/caption/run` reports `failed` | its `errors` carry Google's own words. `429` is the free-tier rate limit and sorts itself out on later ticks |
 
 **Reading a refusal.** It carries a `check` block describing what is stored —
