@@ -10,13 +10,16 @@ kv_namespaces = [
   { binding = "BATCHES", id = "REPLACE_WITH_YOUR_KV_ID" },
 ]
 
-# Captioning runs a few photos at a time from this tick rather than in one long
-# pass, which keeps every invocation small and stays inside Gemini's free rate
-# limit by construction.
+# The safety net, not the main road. Photos are captioned as they arrive, from
+# the webhook that files them; this tick exists for what that could not do —
+# anything Gemini rate-limited, which is most of a two-hundred-photo burst.
 #
-# Every two minutes, not every minute: 720 firings a day leaves room under the
-# free allowance for key listings even if something later starts listing on the
-# idle path. As written an idle tick reads one key and does not list at all.
+# Every two minutes, not every minute. The bill that blocked a real account was
+# never the frequency, it was that each firing LISTED keys to ask whether there
+# was work: 1440 list operations a day against an allowance of 1000, spent on a
+# weekend when nobody touched the bot. An idle tick now reads one key and lists
+# nothing, so 720 firings cost 720 reads out of 100,000 — and draining a burst
+# in under an hour is worth more than the 0.7% saved by slowing it down.
 [triggers]
 crons = ["*/2 * * * *"]
 
@@ -26,9 +29,13 @@ crons = ["*/2 * * * *"]
 ALLOWED_CHATS = ""
 # Width to hand the model when captioning. One Gemini image tile.
 CAPTION_PX = "768"
-# Photos captioned per tick. Higher finishes a batch sooner and spends the
-# free-tier rate limit faster.
-CAPTION_PER_TICK = "10"
+# Photos captioned per tick. Not a taste setting: a Worker on the free plan is
+# cut off after 50 requests to other services in one invocation, and a photo
+# costs up to seven of them (read it, ask Telegram for the file, download it,
+# ask Gemini, sometimes ask again without the system instruction, write it
+# back). Six leaves headroom; ten does not. Six every two minutes is 180 an
+# hour, which is also under Gemini's free rate limit.
+CAPTION_PER_TICK = "6"
 
 # Secrets are NOT set here — they would end up in git. Set them with:
 #   wrangler secret put TG_TOKEN

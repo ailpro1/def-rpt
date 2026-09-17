@@ -76,7 +76,18 @@ export function makeEnv(kv, extra = {}) {
   };
 }
 
-export const ctx = { waitUntil: (p) => p };
+// The real runtime keeps the invocation alive for whatever is handed to
+// waitUntil. Here they are collected instead, so a test can await the work that
+// happens after the reply — captioning on arrival, for one.
+const deferred = [];
+export const ctx = {
+  waitUntil: (p) => { deferred.push(Promise.resolve(p).catch(() => {})); return p; },
+};
+
+/** Wait for everything handed to ctx.waitUntil, including work it started. */
+export async function settle() {
+  while (deferred.length) await Promise.all(deferred.splice(0));
+}
 
 /* ---- synthetic Telegram updates ---- */
 

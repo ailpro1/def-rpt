@@ -125,7 +125,8 @@ function summary(rec) {
   };
 }
 
-/** Write a photo, keeping its summary on the key. */
+/** Write a photo, keeping its summary on the key. Exported for the captioner,
+ * which already holds the record and has no reason to read it back first. */
 const putPhoto = (env, code, rec) =>
   env.BATCHES.put(photoKey(code, rec.id), JSON.stringify(rec), {
     expirationTtl: TTL_SECONDS,
@@ -272,7 +273,7 @@ function tally(photos) {
   return [...counts.entries()];
 }
 
-const batch = { queueList, queueAdd, queueRemove, newCode, openBatch, getMeta, activeBatch, setSection, summary, addPhoto, listSummaries, getPhoto, listPhotos, updatePhoto, dropPhoto, closeBatch, deleteBatch, manifest, tally, TTL_SECONDS, putMeta };
+const batch = { queueList, queueAdd, queueRemove, newCode, openBatch, getMeta, activeBatch, setSection, summary, addPhoto, listSummaries, getPhoto, listPhotos, updatePhoto, dropPhoto, closeBatch, deleteBatch, manifest, tally, TTL_SECONDS, putMeta, putPhoto };
 
 /* ---------- telegram.js ---------- */
 
@@ -368,8 +369,15 @@ const tg = { openFile, sendDocument, pickSize, sendMessage, getFile, setWebhook,
 //      every photo, so the bot records the one nearest a Gemini tile when the
 //      photo arrives and that is what gets sent.
 //
-// Nothing here is on the critical path: captioning runs from a cron tick, a few
-// photos at a time, and a photo that fails simply arrives blank.
+// Nothing here is on the critical path. Captioning happens twice over:
+//
+//   * as each photo arrives, so a small job is written up by the time the last
+//     photo is forwarded and there is nothing to wait for;
+//   * from a cron tick, which sweeps up what the arrival pass could not do —
+//     Gemini's free tier allows about fifteen requests a minute, so a couple of
+//     hundred photos forwarded in one go will always spill over.
+//
+// A photo that fails simply arrives blank.
 
 
 
@@ -558,8 +566,11 @@ async function captionPending(env, max = 6, { rescan = false } = {}) {
       } catch (err) {
         out.failed++;
         if (out.errors.length < 3) out.errors.push(err.message);
-        // Mark it tried so one unreadable photo cannot block the queue forever.
-        await batch.updatePhoto(env, code, s.id, { aiCaption: '' });
+        // Mark it tried so one unreadable photo cannot block the queue forever
+        // — but not when the only thing wrong was a rate limit, which is the
+        // ordinary outcome of forwarding two hundred photos at once and clears
+        // by itself. That one is left pending for the next tick.
+        if (!err.retry) await batch.updatePhoto(env, code, s.id, { aiCaption: '' });
       }
     }
   }
@@ -581,7 +592,9 @@ async function captionOne(env, code, photo, lib, cool) {
       try {
         const text = await ask(env, model, img, prompt, plain);
         if (text) {
-          await batch.updatePhoto(env, code, photo.id, { aiCaption: text, aiModel: model });
+          // Written straight from the record in hand: reading it back to patch
+          // it would cost an extra operation on every photo of every batch.
+          await batch.putPhoto(env, code, { ...photo, aiCaption: text, aiModel: model });
           return text;
         }
         last = new Error('empty reply');
@@ -595,7 +608,39 @@ async function captionOne(env, code, photo, lib, cool) {
       }
     }
   }
-  throw last || new Error('no model available');
+  const err = last || new Error('every model is resting');
+  // Rate limits and resting models clear on their own, so the caller should
+  // leave the photo pending rather than writing it off.
+  if (!last || last.step) err.retry = true;
+  throw err;
+}
+
+/**
+ * Caption one photo the moment it is filed, from the webhook that filed it.
+ *
+ * This is what makes an ordinary job — a few dozen photos — arrive already
+ * written up, with no tick to wait for. It gives up cheaply and silently: the
+ * photo is already on the queue, so anything not done here is done by the next
+ * tick, and nothing about the bot's reply depends on it.
+ */
+async function captionOnArrival(env, code, rec) {
+  if (!env.GEMINI_KEY || !rec || rec.caption) return null;
+
+  const cool = await cooling(env);
+  // Gemini said "too fast" a moment ago and the rest of the burst is still
+  // coming. Stop before reading the library or downloading anything: every
+  // photo behind this one would otherwise pay for the same refusal.
+  if (!LADDER.some((m) => cool.ready(m))) return null;
+
+  // Outside the try on purpose: only a failure to caption should write the photo
+  // off, never a storage hiccup reading the library.
+  const lib = await library(env);
+  try {
+    return await captionOne(env, code, rec, lib, cool);
+  } catch (err) {
+    if (!err.retry) await batch.updatePhoto(env, code, rec.id, { aiCaption: '' });
+    return null;
+  }
 }
 
 /** Every batch that still exists — the slow way, for a rescan. */
@@ -617,6 +662,7 @@ async function openCodes(env) {
 
 // What the site team sees. Every reply is one short line, because this is read
 // one-handed, outdoors, on a phone.
+
 
 
 
@@ -730,6 +776,15 @@ async function filePhoto(env, msg, chatId, ctx) {
     h: asDocument ? 0 : big.height,
     mediaGroupId: msg.media_group_id || '',
   });
+
+  // Write it up now, in the same breath as filing it. Telegram delivers every
+  // photo as its own request, so this costs one Gemini call per request rather
+  // than a queue anywhere, and a few dozen photos are captioned by the time the
+  // last one is forwarded. It runs after the reply is sent and can fail
+  // silently: the photo is on the queue, and the tick sweeps up the rest.
+  if (ctx && ctx.waitUntil) {
+    ctx.waitUntil(captionOnArrival(env, meta.code, rec).catch(() => {}));
+  }
 
   // Album items arrive as separate updates seconds apart; acking each one would
   // bury the chat, so only the first of a group speaks.
@@ -847,8 +902,10 @@ const cors = () => ({
 });
 
 export default {
-  /** The cron tick: caption a few photos, so a batch is written up by the time
-   * the office opens it. Small and often beats one long run. */
+  /** The safety net. Photos are captioned as they arrive (see filePhoto in
+   * bot.js); this sweeps up the ones Gemini was too busy to take, a few at a
+   * time, so a burst is written up by the time the office opens it. An idle
+   * tick reads one key and stops. */
   async scheduled(event, env, ctx) {
     ctx.waitUntil(captionPending(env, Number(env.CAPTION_PER_TICK) || 6)
       .then((r) => console.log('caption tick', JSON.stringify(r)))

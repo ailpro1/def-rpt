@@ -5,7 +5,7 @@
 import { captionPending } from '../src/caption.js';
 import { handleUpdate } from '../src/bot.js';
 import * as batch from '../src/batch.js';
-import { FakeKV, fakeTelegram, makeEnv, ctx, cmd, photo, check, report } from './harness.js';
+import { FakeKV, fakeTelegram, makeEnv, ctx, settle, cmd, photo, check, report } from './harness.js';
 
 const tgStub = fakeTelegram();
 const gemini = { calls: [], reply: 'UNFILLED GROUT', fail: null };
@@ -27,7 +27,11 @@ globalThis.fetch = async (url, init) => {
 };
 
 const kv = new FakeKV();
-const env = makeEnv(kv, { GEMINI_KEY: 'test-key', CAPTION_PX: '768' });
+// The bot here has no Gemini key, so photos arrive uncaptioned and the sweep
+// below has something to do. Captioning on arrival is a separate entry point
+// and gets its own section at the end of this file, with its own key.
+const env = makeEnv(kv, { CAPTION_PX: '768' });
+const ai = { ...env, GEMINI_KEY: 'test-key' };
 const feed = (u) => handleUpdate(env, u, ctx);
 
 // Give DEFAULT_LIBRARY a value: the sources read it as a global that build.mjs
@@ -49,7 +53,7 @@ const code = await kv.get('chat:-100123');
 
 /* ---------- the pass ---------- */
 
-const run1 = await captionPending(env, 6);
+const run1 = await captionPending(ai, 6);
 check('one photo captioned', run1.done === 1, JSON.stringify(run1));
 check('a typed caption is left alone', gemini.calls.length === 1, `${gemini.calls.length} calls`);
 
@@ -83,7 +87,7 @@ check('the reply is capped short', sent.generationConfig.maxOutputTokens === 32)
 /* ---------- second pass does not redo work ---------- */
 
 const before = gemini.calls.length;
-const run2 = await captionPending(env, 6);
+const run2 = await captionPending(ai, 6);
 check('nothing left to do', run2.done === 0 && gemini.calls.length === before, JSON.stringify(run2));
 
 /* ---------- the manifest reflects it ---------- */
@@ -102,12 +106,21 @@ await feed(cmd('/sec KITCHEN'));
 await feed(photo());
 gemini.calls.length = 0;
 gemini.fail = { status: 429, message: 'Quota exceeded' };
-const limited = await captionPending(env, 2);
+const limited = await captionPending(ai, 2);
 check('a rate limit tries the next model up',
   gemini.calls.map((c) => c.model).join(',') === 'gemini-2.5-flash-lite,gemini-2.5-flash',
   gemini.calls.map((c) => c.model).join(','));
 check('the photo is not left to jam the queue', limited.failed === 1, JSON.stringify(limited));
 check('a cooldown is remembered', !!(await kv.get('ai:cooldown')));
+
+// A rate limit is the ordinary outcome of forwarding a couple of hundred photos
+// at once, and it clears by itself. Writing the photo off as tried would leave
+// most of a big job permanently blank — it has to come back on the next tick.
+const stillOpen = (await batch.listSummaries(env, code)).filter((p) => !p.tried);
+check('a rate-limited photo stays pending for the next tick',
+  stillOpen.length === 1, `${stillOpen.length} pending`);
+// Clear it by hand so the cases below start from a drained queue.
+if (stillOpen[0]) await batch.dropPhoto(env, code, stillOpen[0].id);
 
 /* ---------- a batch is never blocked by captioning ---------- */
 
@@ -133,7 +146,7 @@ await feed(cmd('/project SECOND JOB'));
 await feed(cmd('/sec BATH 2'));
 await feed(photo());
 gemini.calls.length = 0;
-await captionPending(env, 1);
+await captionPending(ai, 1);
 check('a pushed library is used instead',
   /A CAPTION ONLY THE OFFICE HAS/.test(gemini.calls[0].body.contents[0].parts[1].text),
   gemini.calls[0].body.contents[0].parts[1].text);
@@ -165,7 +178,7 @@ globalThis.fetch = async (url, init) => {
 
 await feed(cmd('/sec BATH 3'));
 await feed(photo());
-const picky = await captionPending(env, 1);
+const picky = await captionPending(ai, 1);
 check('a model refusing the instruction still produces a caption',
   picky.done === 1, JSON.stringify(picky));
 check('it was refused once, then retried without it',
@@ -178,5 +191,91 @@ check('the rules travel in the prompt instead', /UPPERCASE, 4-7 words/.test(sent
 check('the photo is still attached',
   plainBody.contents[0].parts.some((p) => p.inline_data));
 globalThis.fetch = plainStub;
+
+/* ---------- captioning as the photo arrives ---------- */
+/* The tick is the safety net, not the main road. An ordinary job is a few dozen
+   photos, and those should be written up by the time the last one is forwarded
+   — nobody should be sitting watching a clock for a batch of twenty. */
+
+{
+  const kv2 = new FakeKV();
+  const live = makeEnv(kv2, { GEMINI_KEY: 'test-key', CAPTION_PX: '768' });
+  const send = (u) => handleUpdate(live, u, ctx);
+
+  gemini.fail = null;
+  gemini.reply = 'HOLLOW TILE';
+  await send(cmd('/project 9 JALAN MERBAU'));
+  await send(cmd('/sec BATH 1'));
+  await send(photo());
+  await settle();
+
+  const code2 = await kv2.get('chat:-100123');
+  const arrived = (await batch.listSummaries(live, code2))[0];
+  check('a photo is captioned as it arrives, with no tick',
+    arrived && arrived.caption === 'HOLLOW TILE' && arrived.captionSource === 'ai',
+    JSON.stringify(arrived));
+
+  // And having done it, the tick finds nothing and drops the batch off the queue.
+  const sweep = await captionPending(live, 6);
+  check('the tick has nothing left to do after an arrival pass',
+    sweep.done === 0, JSON.stringify(sweep));
+  check('a fully captioned batch leaves the queue',
+    !(await batch.queueList(live)).includes(code2),
+    JSON.stringify(await batch.queueList(live)));
+
+  /* A burst: Gemini rate-limits partway through, as it will with 200 photos. */
+
+  await kv2.delete('ai:cooldown');
+  gemini.fail = { status: 429, message: 'Quota exceeded' };
+  gemini.calls.length = 0;
+  await send(cmd('/sec KITCHEN'));
+  // One at a time, because that is how they land: Telegram delivers each photo
+  // as its own request, seconds apart, so what the first one learns is there for
+  // the next.
+  for (let i = 0; i < 3; i++) { await send(photo()); await settle(); }
+
+  const pending = (await batch.listSummaries(live, code2)).filter((p) => !p.tried);
+  check('a rate-limited burst is left for the tick, not written off',
+    pending.length === 3, `${pending.length} of 3 still pending`);
+  check('the burst stops asking once a model is resting, rather than one refusal each',
+    gemini.calls.length === 2, `${gemini.calls.length} calls for 3 photos`);
+  check('the batch is back on the queue for the tick',
+    (await batch.queueList(live)).includes(code2));
+
+  // Cooldown over, Gemini willing: the tick clears the backlog.
+  await kv2.delete('ai:cooldown');
+  gemini.fail = null;
+  const rescue = await captionPending(live, 6);
+  check('the tick picks up what the burst could not', rescue.done === 3, JSON.stringify(rescue));
+
+  /* A photo the bot cannot read is a different thing: trying again will never
+     help, so it is marked and never looked at again. */
+
+  await send(cmd('/sec YARD'));
+  gemini.fail = { status: 403, message: 'API key not valid' };
+  await send(photo());
+  await settle();
+  const dud = (await batch.listSummaries(live, code2)).filter((p) => !p.tried);
+  check('a permanent failure is written off, not retried for ever',
+    dud.length === 0, `${dud.length} still pending`);
+  gemini.fail = null;
+}
+
+/* ---------- no key: the bot still collects ---------- */
+
+{
+  const kv3 = new FakeKV();
+  const keyless3 = makeEnv(kv3, { CAPTION_PX: '768' });
+  const before3 = gemini.calls.length;
+  await handleUpdate(keyless3, cmd('/project NO AI HERE'), ctx);
+  await handleUpdate(keyless3, cmd('/sec PORCH'), ctx);
+  await handleUpdate(keyless3, photo(), ctx);
+  await settle();
+  const code3 = await kv3.get('chat:-100123');
+  check('without a key the photo is still filed',
+    (await batch.listSummaries(keyless3, code3)).length === 1);
+  check('and nothing is asked of Gemini', gemini.calls.length === before3,
+    `${gemini.calls.length - before3} calls`);
+}
 
 report('captioning');

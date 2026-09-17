@@ -3,6 +3,7 @@
 
 import * as tg from './telegram.js';
 import * as batch from './batch.js';
+import { captionOnArrival } from './caption.js';
 
 const HELP = [
   'Insta Report intake',
@@ -114,6 +115,15 @@ async function filePhoto(env, msg, chatId, ctx) {
     h: asDocument ? 0 : big.height,
     mediaGroupId: msg.media_group_id || '',
   });
+
+  // Write it up now, in the same breath as filing it. Telegram delivers every
+  // photo as its own request, so this costs one Gemini call per request rather
+  // than a queue anywhere, and a few dozen photos are captioned by the time the
+  // last one is forwarded. It runs after the reply is sent and can fail
+  // silently: the photo is on the queue, and the tick sweeps up the rest.
+  if (ctx && ctx.waitUntil) {
+    ctx.waitUntil(captionOnArrival(env, meta.code, rec).catch(() => {}));
+  }
 
   // Album items arrive as separate updates seconds apart; acking each one would
   // bury the chat, so only the first of a group speaks.

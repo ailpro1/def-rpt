@@ -115,8 +115,9 @@ export function summary(rec) {
   };
 }
 
-/** Write a photo, keeping its summary on the key. */
-const putPhoto = (env, code, rec) =>
+/** Write a photo, keeping its summary on the key. Exported for the captioner,
+ * which already holds the record and has no reason to read it back first. */
+export const putPhoto = (env, code, rec) =>
   env.BATCHES.put(photoKey(code, rec.id), JSON.stringify(rec), {
     expirationTtl: TTL_SECONDS,
     metadata: summary(rec),

@@ -20,8 +20,11 @@ That is a deliberate choice, not a shortcut:
   account before it can be enabled. Nothing here needs it.
 - **No base64 of photos anywhere.** The Workers free plan caps CPU per request;
   streaming a photo costs almost none, encoding one costs a lot.
-- **One KV write per photo.** The test run files 8 photos and 9 commands in 14
-  writes, against a free allowance of 1,000 a day.
+- **Two KV writes per photo at most** — one to file it, one to store its
+  caption. The test run files 8 photos and 9 commands in 17 writes. A
+  200-photo day is about 400, against a free allowance of 1,000; two such days
+  in one calendar day would be the first thing to run out, and captioning is
+  what stops, not collecting.
 
 **Before deploying, check these still hold** — they are what the design rests on:
 
@@ -109,6 +112,31 @@ camera. The stored time only orders the photos and lets the app spot a batch
 that has landed on the wrong day, where the project screen offers to retime the
 lot to the inspection date.
 
+## How captioning runs
+
+Twice over, because one pass cannot cover both shapes of job.
+
+**As each photo arrives.** Telegram delivers every photo as its own request, so
+the handler that files it also captions it — one Gemini call, inside the
+invocation that was happening anyway. A few dozen photos are written up by the
+time the last one is forwarded and `/done` has nothing to wait for.
+
+**From a cron tick, every two minutes.** Google's free tier takes roughly
+fifteen requests a minute, so a couple of hundred photos forwarded in one go
+will mostly be turned away. A refusal is not a verdict: the photo stays pending
+and the batch stays on `queue:pending`, and the tick clears six at a time until
+the list is empty. Around 180 an hour, which finishes a 200-photo day inside the
+hour.
+
+The distinction that makes this work is between a failure that will clear and
+one that will not. A rate limit or a resting model leaves the photo pending; a
+403, an unreadable file or an empty answer marks it tried, so one bad photo
+cannot be retried for ever.
+
+An idle tick reads one key and stops — no listing. That matters: listings are
+the scarcest free allowance at 1,000 a day, and a tick that searched for work
+instead of reading a queue once had a real account blocked over a weekend.
+
 ## API the app uses
 
 | Route | |
@@ -123,8 +151,10 @@ lot to the inspection date.
 
 ```sh
 node worker/build.mjs          # src/ -> dist/worker.js, the file you paste
-node worker/test/run.js        # 36 checks against the sources
-node worker/test/bundle.test.js  # 19 checks against the built file
+node worker/test/run.js          # 36 checks against the sources
+node worker/test/caption.test.js # 39 checks on captioning, against a stubbed Gemini
+node worker/test/bundle.test.js  # 32 checks against the built file
+node worker/test/scale.test.js   # 21 checks on what a 200-photo job costs
 ```
 
 `run.js` drives the real handlers against a fake KV and a stubbed Telegram — a
@@ -135,6 +165,12 @@ allowlist, and the KV write count.
 Cloudflare — and goes in only through `fetch()`, the way Cloudflare does, so a
 flattening mistake cannot slip through. No wrangler, no network, no account
 needed for either.
+
+`scale.test.js` counts storage operations rather than asserting behaviour: no
+path that runs per photo may cost more because the batch is bigger, and an idle
+cron tick must not list keys at all. Both rules were broken once and both broke
+something real — a half-imported 197-photo job, and an account whose storage was
+blocked over a quiet weekend.
 
 `python3 worker/test/e2e.py` goes further: the real Worker on one port and the
 built admin app on another, driven in headless Chromium, so a batch really does

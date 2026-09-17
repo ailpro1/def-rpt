@@ -23,8 +23,10 @@ const cors = () => ({
 });
 
 export default {
-  /** The cron tick: caption a few photos, so a batch is written up by the time
-   * the office opens it. Small and often beats one long run. */
+  /** The safety net. Photos are captioned as they arrive (see filePhoto in
+   * bot.js); this sweeps up the ones Gemini was too busy to take, a few at a
+   * time, so a burst is written up by the time the office opens it. An idle
+   * tick reads one key and stops. */
   async scheduled(event, env, ctx) {
     ctx.waitUntil(captionPending(env, Number(env.CAPTION_PER_TICK) || 6)
       .then((r) => console.log('caption tick', JSON.stringify(r)))
