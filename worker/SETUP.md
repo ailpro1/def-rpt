@@ -133,87 +133,30 @@ copy one file.
 
 ---
 
-## Turning on AI captions — 5 min, optional
+## Turning on AI captions — 2 min, optional
 
-Without this the bot collects and sorts, and photos arrive with whatever caption
-the site team typed. With it, photos arrive already captioned and your job is to
-read and correct rather than write.
+**This is a setting in the app, not on the Worker.** The bot collects and sorts
+photos; the captions are written in Insta Report, once the photos are in.
 
-It uses the same free Google AI Studio key the app uses. You can use the same
-key in both places.
+It used to be the other way round, with a second AI key on the Worker and a
+schedule to work through the backlog. That meant two AI setups to keep in step
+and no way to see into the one on the server when it stopped — which it did,
+silently, more than once. There is nothing to set up here any more.
 
-22. In the Worker: **Settings** → **Variables and Secrets** → Add
-    `GEMINI_KEY`, type **Secret**, value = your Google AI Studio key. **Deploy**.
+22. **Insta Report → Settings → Assistant → AI assistant.** Turn it on, paste an
+    Anthropic API key from [console.anthropic.com](https://console.anthropic.com),
+    and tap **Test connection**.
 
-    That is all captioning needs for an ordinary job. Each photo is captioned
-    the moment it lands, in the same breath as being filed, so by the time you
-    have finished forwarding a room it is already written up.
+23. Import a batch as usual. When the photos land, the app offers to write the
+    captions — say yes and watch it work through them, room by room. You review
+    and edit afterwards; nothing is final.
 
-23. **Give the Worker an alarm clock.**
+**What to expect.** A 200-photo inspection takes a couple of minutes and costs
+about twenty US cents. A caption the site team typed in Telegram is never
+overwritten — they were standing in front of it.
 
-    Step 22 handles a few dozen photos. It cannot handle a few hundred: Google's
-    free tier takes about fifteen requests a minute, so forwarding a whole day's
-    work in one go means most of them are turned away. Those photos are not
-    lost — they go on a list of unfinished work — but something has to come back
-    for them later, and the Worker only wakes when something calls it. A cron
-    trigger is Cloudflare waking it on a schedule.
-
-    **Settings** → **Trigger Events** (or **Triggers**) → **Add** → **Cron
-    Trigger**, and enter:
-
-    ```
-    */2 * * * *
-    ```
-
-    That is "every two minutes" — five fields for minute, hour, day, month and
-    weekday; `*` means "every one of these" and `*/2` means "every second one".
-    Save.
-
-    Each wake-up it clears up to six of the leftovers, then goes back to sleep.
-    When there are none it reads a single key and stops, which costs the account
-    almost nothing. Skip this step and small jobs still get captioned; a big
-    forwarding session will come through half blank.
-
-    **Do not set this to every minute.** The free plan's smallest allowance is
-    1,000 key *listings* a day. An earlier version searched for work on every
-    tick, which at one a minute is 1,440 listings and had a real account's
-    storage blocked over a weekend in which nobody touched the bot. The Worker
-    no longer searches — it keeps a list — but there is nothing to gain from
-    firing twice as often, so leave it at two minutes.
-
-24. **Check it works, without waiting for the alarm.** Optional — this just
-    turns "is it working?" into a five-second answer.
-
-    Forward a photo with **no** caption, then visit this address (the same
-    secret as step 17):
-
-    ```
-    https://YOUR-WORKER.workers.dev/api/caption/run?secret=YOUR_WEBHOOK_SECRET
-    ```
-
-    It means "do the captioning now, and tell me what happened". You should see:
-
-    ```json
-    {"ok":true,"done":1,"failed":0,"remaining":0,"errors":[]}
-    ```
-
-    `done: 1` is one photo captioned. If the key is missing or wrong it says so
-    instead of pretending. Then send `/done` and import — the caption is there.
-
-25. Optional but worth it: **Insta Report → Settings → Telegram Intake → Send
-    caption library to the bot**. It asks for the webhook secret once. Without
-    this the bot hints the model with the caption list built into it, which is
-    the app's defaults but not the entries you have added since.
-
-**What to expect.** A small job — a few dozen photos — is captioned as you
-forward it and is ready the moment you send `/done`. A big one runs into
-Google's free rate limit partway through, and the rest is cleared at about 180
-photos an hour by the alarm clock in step 23, so 200 photos are finished within
-the hour. Import before it finishes and the screen tells you how many are still
-coming; you can wait, or import and use the app's own assistant.
-
-A caption the site team typed is never overwritten — they were standing in front
-of it. Captioning failures are not fatal: that photo simply arrives blank.
+If you would rather do it a section at a time, every section screen has its own
+caption button. The offer after an import is a shortcut, not the only way.
 
 ## If an import stops partway
 
@@ -250,15 +193,8 @@ reclaims the tab. Nothing is lost and nothing needs undoing:
 | Photos are ignored, no tick | no batch open: send `/project <name>` first |
 | Fewer photos imported than you sent | run the import again with the same code — photos already in are skipped, so only the missing ones come down. If the code no longer works, the bot never received the rest: check `/list` against what you forwarded |
 | "Could not reach the intake bot" on a big batch | the Worker is out of date. Re-paste `worker/dist/worker.js` (step 13) and Deploy. Before this fix, a large batch cost the Worker one storage read per photo on every request, and Cloudflare cut it off — the browser reports that as unreachable, because the error page it gets back carries no CORS headers |
-| Anything at all to do with captions | visit `/api/status?secret=YOUR_WEBHOOK_SECRET` first. It lists every batch, what each is still waiting on, whether the key is set, and says in plain words which of those is the problem |
+| Photos import but have no captions | captioning is in the app now, not the bot. Settings → Assistant → AI assistant, and check the key is set |
 | You re-pasted the Worker and nothing changed | check the paste actually landed: `/health` reports a build stamp, and `node worker/build.mjs` prints the one it should be. If they differ, the old file is still running |
-| No captions at all, on any photo | `GEMINI_KEY` is missing or wrong (step 22). `/api/status` says so outright, and lists the models your key can actually reach |
-| You replaced the key and it still will not caption | the old key's model list and any resting models are remembered for a few minutes. `/api/caption/run?secret=…&reset=1` forgets both and tries again now |
-| Photos waiting but `/api/caption/run` says `"idle":true` | the queue has lost them — they were filed before the queue existed. Run `/api/caption/run?secret=…&rescan=1` once; it captions them and puts them back on the queue for good |
-| Captions on the first photos of a big batch, then nothing | Google's free rate limit, which is normal. The rest are captioned by the cron trigger over the following hour. If they never arrive, the alarm clock in step 23 is what is missing |
-| Cloudflare emails that KV is blocked for exceeding a free limit | the allowance resets daily. Check the cron is `*/2 * * * *` and not every minute, and that the Worker is up to date — an idle tick should read one key and list none. The bot keeps collecting photos meanwhile; only captioning pauses |
-| Captions missed on an older batch | the queue of work is kept in one key. If it is ever lost, `/api/caption/run?secret=…&rescan=1` searches every batch instead. It costs listings, so it is never automatic |
-| `/api/caption/run` reports `failed` | its `errors` carry Google's own words. `429` is the free-tier rate limit and sorts itself out on later ticks |
 
 **Reading a refusal.** It carries a `check` block describing what is stored —
 `"TG_TOKEN":{"length":46,"hasColon":true,"charsAfterColon":35,"nonAscii":false,…}`
@@ -285,7 +221,7 @@ as they are.
 /sec CAR PORCH                 file what comes next under this section
 <forward the photos>           each one acked: ✓ CAR PORCH · 3
 /sec KITCHEN                   switch section
-/list                          what is in the batch so far, plus its code and caption count
+/list                          what is in the batch so far, plus its code
 /undo                          remove the last photo
 /done                          finish, get the import code
 /cancel                        throw the batch away

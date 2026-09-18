@@ -56,17 +56,6 @@ export const setWebhook = (env, url, secret) => call(env, 'setWebhook', {
 /** Who this token belongs to — used to confirm setup worked. */
 export const getMe = (env) => call(env, 'getMe', {});
 
-/**
- * Pick the variant nearest a target width. Telegram ships several sizes of every
- * photo, so the right one for the model is already there — no resizing needed,
- * which a Worker could not afford to do anyway.
- */
-export function pickSize(sizes, targetPx) {
-  if (!sizes || !sizes.length) return null;
-  const sorted = [...sizes].sort((a, b) => a.width - b.width);
-  return sorted.find((s) => s.width >= targetPx) || sorted[sorted.length - 1];
-}
-
 /** The largest variant, which is what the report should print. */
 export const largest = (sizes) =>
   (sizes && sizes.length ? [...sizes].sort((a, b) => b.width - a.width)[0] : null);

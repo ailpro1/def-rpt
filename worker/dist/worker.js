@@ -4,11 +4,7 @@
 
 // Which build this is. /health reports it back, so "is my paste live?" is
 // one look rather than an afternoon.
-const BUILD_STAMP = 'db72b1a3';
-
-/* ---------- caption library, from js/captions.js ---------- */
-
-const DEFAULT_LIBRARY = [{"group":"Tiling","items":["UNFILLED GROUT","HOLLOW TILE","ORANGE STICKER - HOLLOW TILE","ORANGE STICKER - HOLLOW TILES","CRACKED TILE","CHIPPED TILE","UNEVEN TILE LEVEL","STAINED TILE","MISALIGNED TILE JOINT","TILE LIPPAGE","OVERALL TILE LIPPAGE RESULTING IN SHARP EDGES ON FLOOR TILES","POOR FINISHING AT GROUTING","YELLOWISH DISCOLOURATION AT GROUTING","VARIATION IN GROUTING TONE OBSERVED"]},{"group":"Wall & Ceiling","items":["UNEVEN PLASTER (WAVY SURFACE)","UNEVEN PLASTER (ROUGH SURFACE)","POOR RENDERING (ROUGH SURFACE)","CRACK OBSERVED ON WALL","CRACK OBSERVED AT WALL JUNCTION","SEPARATION CRACK BETWEEN WALL AND CEILING","MISALIGNED WALL","DEFECTIVE WALL\n1) GREEN STICKER: IDENTIFIED CRACKS","DEFECTIVE WALL\n1) PINK STICKER: DEFECTS IN PAINTING, PLASTERING, AND SURFACE FINISHES.\n2) GREEN STICKER: IDENTIFIED CRACKS\nREMARKS : UNEVEN PLASTER (WAVY SURFACE), POOR PAINT FINISH","DEFECTIVE WALL\n1) CRACKS OBSERVED ON WALL\n2) POOR PAINT FINISH\n3) UNEVEN PLASTER (ROUGH SURFACE)","STAINED WALL","PAINT PEELING","PEELING OFF PAINT","PATCHY PAINT FINISH","POOR PAINT FINISH ON WALL\n(DISCOLOURATION OBSERVED ON WALL)","POOR PAINT FINISH ON WALL/FRAME\n(YELLOWISH DISCOLORATION OBSERVED AT WALL CORNER)","POOR FINISHING ALONG WALL EDGE","DAMP PATCH OBSERVED","SIGNS OF WATER SEEPAGE ON CEILING","CEILING BOARD JOINT VISIBLE","ROUGH SKIM COAT"]},{"group":"Door & Window","items":["MISALIGNED DOOR","DAMAGED DOOR","POOR DOOR FINISH","RUSTED DOOR KNOB","DOOR NOT CLOSING PROPERLY","DOOR DIFFICULT TO CLOSE DUE TO MISALIGNMENT","IMPROPER JOINT AT FRAME","IMPROPER JOINT AT FRAME/SOCKET OUTLET","FRAME CONTACTS WALL DURING OPERATION","GAP AT DOOR FRAME","SEALANT MISSING AT FRAME","IMPROPER SEAL RUBBER INSTALLATION","SCRATCHED GLASS PANEL","STIFF WINDOW OPERATION","WINDOW NOT OPERATING SMOOTHLY DURING OPENING","SQUEAKY DOOR – DOOR PRODUCES NOISE WHEN OPENED OR CLOSED","SQUEAKY WINDOW – WINDOW PRODUCES NOISE WHEN OPENED OR CLOSED","KEY STICKING DURING INSERTION"]},{"group":"Metalwork","items":["RUSTED LATCH","RUSTED STRIKE HOLE","RUSTED GATE POST","RUSTED HINGE","POOR WELD FINISH","PAINT DEFECT ON RAILING","LOOSE RAILING","RUST - STAINED RAILING","FENCING LOOSE AND SAGGING","DEFECTIVE GATE\n- RUSTED, STAINED, POOR PAINT FINISH"]},{"group":"Roofing","items":["LIGHT INGRESS THROUGH ROOF JOINTING","CHIPPED ROOF TILE"]},{"group":"Electrical","items":["VOLTAGE - OK\nRCD TEST - OK","VOLTAGE - OK\nRCD TEST - NOT OK","NO POWER AT SOCKET","SOCKET NOT LEVEL","LOOSE SWITCH PLATE","SUNKEN SWITCH BUTTON","LIGHT POINT NOT FUNCTIONING","EXPOSED CONDUIT","DB LABELLING INCOMPLETE","RCCB 30 mA INSTALLED INSTEAD OF THE SPECIFIED 100 mA RCCB FOR SINGLE-PHASE CIRCUIT","CEILING FAN LOCATION PROVIDES INSUFFICIENT CLEARANCE FOR CERTAIN FAN MODELS"]},{"group":"Plumbing","items":["LEAK AT TRAP","LEAK AT TAP","SLOW DRAINAGE","NO WATER FLOW","FLOOR TRAP NOT LEVEL","PONDING OBSERVED","SILICONE SEAL INCOMPLETE","WC NOT SECURED","BASIN NOT LEVEL","UNFITTED MANHOLE COVER"]},{"group":"General","items":["POOR FINISHING","POOR HOUSEKEEPING","DEBRIS NOT CLEARED","SURFACE NOT CLEANED","INCOMPLETE WORK","ITEM NOT INSTALLED","GENERAL VIEW","OVERVIEW","VIEW OF INSPECTION SECTION","NON-SQUARE STAIR EDGES (NOT 90°), POTENTIAL SAFETY HAZARD","RECTIFICATION REQUIRED","ACCEPTABLE - NO DEFECT OBSERVED"]}];
+const BUILD_STAMP = '90eb6ab5';
 
 /* ---------- batch.js ---------- */
 
@@ -28,33 +24,6 @@ const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // no I/L/O/0/1
 const CODE_LEN = 8;
 const TTL_DAYS = 14;
 const TTL_SECONDS = TTL_DAYS * 86400;
-
-// Which batches still have photos waiting for a caption. The captioning tick
-// reads this one key and stops there when it is empty — listing keys to find
-// that out costs a list operation every minute of every day, which is how a
-// bot that nobody touched used up a month's free allowance in a weekend.
-const QUEUE_KEY = 'queue:pending';
-
-async function queueList(env) {
-  const raw = await env.BATCHES.get(QUEUE_KEY);
-  try { return raw ? JSON.parse(raw) : []; } catch { return []; }
-}
-
-async function queueAdd(env, code) {
-  const codes = await queueList(env);
-  if (codes.includes(code)) return codes;              // already queued: no write
-  const next = [...codes, code];
-  await env.BATCHES.put(QUEUE_KEY, JSON.stringify(next), { expirationTtl: TTL_SECONDS });
-  return next;
-}
-
-async function queueRemove(env, code) {
-  const codes = await queueList(env);
-  if (!codes.includes(code)) return codes;
-  const next = codes.filter((c) => c !== code);
-  await env.BATCHES.put(QUEUE_KEY, JSON.stringify(next), { expirationTtl: TTL_SECONDS });
-  return next;
-}
 
 const metaKey = (code) => `batch:${code}:meta`;
 const photoKey = (code, id) => `batch:${code}:p:${String(id).padStart(12, '0')}`;
@@ -111,17 +80,17 @@ async function setSection(env, meta, title) {
  * lie about the order they were sent in.
  */
 /**
- * The fields anything other than captioning needs. KV can carry this alongside
- * the key, so a listing returns it without a read per photo — which is the
- * difference between a batch costing one request and costing one per photo.
+ * The fields a listing needs. KV can carry this alongside the key, so a listing
+ * returns it without a read per photo — which is the difference between a batch
+ * costing one request and costing one per photo.
  */
 function summary(rec) {
   return {
     id: rec.id,
     section: rec.section,
-    caption: rec.aiCaption || rec.caption || '',
-    captionSource: rec.aiCaption ? 'ai' : (rec.caption ? 'typed' : ''),
-    tried: rec.aiCaption !== undefined || !!rec.caption,
+    // Whatever the site team typed on the photo in Telegram, and nothing else.
+    // Writing the captions is the app's job now.
+    caption: rec.caption || '',
     takenAt: rec.takenAt,
     takenSource: rec.takenSource,
     w: rec.w,
@@ -129,8 +98,7 @@ function summary(rec) {
   };
 }
 
-/** Write a photo, keeping its summary on the key. Exported for the captioner,
- * which already holds the record and has no reason to read it back first. */
+/** Write a photo, keeping its summary on the key. */
 const putPhoto = (env, code, rec) =>
   env.BATCHES.put(photoKey(code, rec.id), JSON.stringify(rec), {
     expirationTtl: TTL_SECONDS,
@@ -141,7 +109,6 @@ async function addPhoto(env, meta, photo) {
   const rec = {
     id: photo.id,
     fileId: photo.fileId,
-    aiFileId: photo.aiFileId || photo.fileId,
     section: meta.section || 'GENERAL',
     caption: photo.caption || '',
     takenAt: photo.takenAt,
@@ -149,12 +116,8 @@ async function addPhoto(env, meta, photo) {
     w: photo.w || 0,
     h: photo.h || 0,
     mediaGroupId: photo.mediaGroupId || '',
-    // Filled in later by the captioning pass; absent means "not looked at yet".
-    aiCaption: undefined,
   };
   await putPhoto(env, meta.code, rec);
-  // Only a photo that needs a caption puts its batch in the queue.
-  if (!rec.caption) await queueAdd(env, meta.code);
   return rec;
 }
 
@@ -173,7 +136,7 @@ async function listSummaries(env, code) {
     const page = await env.BATCHES.list({ prefix: `batch:${code}:p:`, cursor });
     for (const k of page.keys) {
       if (k.metadata) out.push(k.metadata);
-      else out.push({ id: Number(k.name.split(':').pop()), section: 'GENERAL', caption: '', tried: false });
+      else out.push({ id: Number(k.name.split(':').pop()), section: 'GENERAL', caption: '' });
     }
     cursor = page.list_complete ? null : page.cursor;
   } while (cursor);
@@ -225,7 +188,6 @@ async function closeBatch(env, meta) {
  * swept up by KV itself instead of costing this request a read apiece.
  */
 async function deleteBatch(env, meta, budget = 40) {
-  await queueRemove(env, meta.code);
   await env.BATCHES.delete(metaKey(meta.code));
   await env.BATCHES.delete(chatKey(meta.chatId));
   const summaries = await listSummaries(env, meta.code);
@@ -248,8 +210,7 @@ function manifest(meta, photos) {
     bySection.get(title).push({
       n: i + 1,
       id: p.id,
-      caption: p.aiCaption || p.caption || '',
-      captionSource: p.aiCaption ? 'ai' : (p.caption ? 'typed' : ''),
+      caption: p.caption || '',
       takenAt: p.takenAt,
       takenSource: p.takenSource,
       w: p.w,
@@ -265,7 +226,6 @@ function manifest(meta, photos) {
     createdAt: meta.createdAt,
     closedAt: meta.closedAt,
     total: photos.length,
-    pending: photos.filter((p) => (p.tried !== undefined ? !p.tried : (p.aiCaption === undefined && !p.caption))).length,
     sections: order.map((title) => ({ title, photos: bySection.get(title) })),
   };
 }
@@ -277,7 +237,7 @@ function tally(photos) {
   return [...counts.entries()];
 }
 
-const batch = { queueList, queueAdd, queueRemove, newCode, openBatch, getMeta, activeBatch, setSection, summary, addPhoto, listSummaries, getPhoto, listPhotos, updatePhoto, dropPhoto, closeBatch, deleteBatch, manifest, tally, TTL_SECONDS, putMeta, putPhoto };
+const batch = { newCode, openBatch, getMeta, activeBatch, setSection, summary, addPhoto, listSummaries, getPhoto, listPhotos, updatePhoto, dropPhoto, closeBatch, deleteBatch, manifest, tally, TTL_SECONDS, putMeta };
 
 /* ---------- telegram.js ---------- */
 
@@ -339,450 +299,16 @@ const setWebhook = (env, url, secret) => call(env, 'setWebhook', {
 /** Who this token belongs to — used to confirm setup worked. */
 const getMe = (env) => call(env, 'getMe', {});
 
-/**
- * Pick the variant nearest a target width. Telegram ships several sizes of every
- * photo, so the right one for the model is already there — no resizing needed,
- * which a Worker could not afford to do anyway.
- */
-function pickSize(sizes, targetPx) {
-  if (!sizes || !sizes.length) return null;
-  const sorted = [...sizes].sort((a, b) => a.width - b.width);
-  return sorted.find((s) => s.width >= targetPx) || sorted[sorted.length - 1];
-}
-
 /** The largest variant, which is what the report should print. */
 const largest = (sizes) =>
   (sizes && sizes.length ? [...sizes].sort((a, b) => b.width - a.width)[0] : null);
 
-const tg = { openFile, sendDocument, pickSize, sendMessage, getFile, setWebhook, getMe, largest };
-
-/* ---------- caption.js ---------- */
-
-// Captions photos with Gemini, so a batch arrives already written up and the
-// office only reviews.
-//
-// This is the browser assistant's logic (js/ai.js) with the browser taken out:
-// same system prompt, same model ladder, same library hinting. Two deliberate
-// differences, both forced by where it runs:
-//
-//   1. One photo per request, not eight. The app batches to save tokens, but a
-//      Worker pays for base64 in CPU time and the free plan's budget is per
-//      invocation. One small photo is comfortably inside it whatever the exact
-//      limit turns out to be; eight would be a gamble.
-//   2. No canvas to downscale with. Telegram already ships several sizes of
-//      every photo, so the bot records the one nearest a Gemini tile when the
-//      photo arrives and that is what gets sent.
-//
-// Nothing here is on the critical path. Captioning happens twice over:
-//
-//   * as each photo arrives, so a small job is written up by the time the last
-//     photo is forwarded and there is nothing to wait for;
-//   * from a cron tick, which sweeps up what the arrival pass could not do —
-//     Gemini's free tier allows about fifteen requests a minute, so a couple of
-//     hundred photos forwarded in one go will always spill over.
-//
-// A photo that fails simply arrives blank.
-
-
-
-const HOST = 'https://generativelanguage.googleapis.com/v1beta/models';
-const WANTED = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
-const COOLDOWN_MS = 90_000;
-const HINTS = 24;                 // library entries shown to the model
-const COOLDOWN_KEY = 'ai:cooldown';
-const MODELS_KEY = 'ai:models';
-const MODELS_TTL = 21_600;        // 6 hours; a key's model list barely moves
-const LADDER_MAX = 3;             // models tried per photo, before the budget bites
-
-const SYSTEM =
-  'Caption photos for a building defect report. Reply with the caption only. '
-  + 'UPPERCASE, 4-7 words, plain QA/QC wording a contractor can action. '
-  + 'Reuse a caption from the library when one fits. '
-  + 'No defect visible: describe the item factually. Technical terms stay in English. '
-  // These photos are stamped by the site team's camera app. The date is not the
-  // defect and must never become the caption.
-  + 'Ignore any date or time printed on the photo.';
-
-const clean = (t) => String(t || '').replace(/^["'\s]+|["'.\s]+$/g, '').toUpperCase().slice(0, 90);
-
-/* ------------------------- the library ------------------------- */
-
-/**
- * The office's caption library if it has been pushed, otherwise the one built
- * into this file from js/captions.js. Either way the model is hinted with the
- * same wording the report will print.
- */
-async function library(env) {
-  const raw = await env.BATCHES.get('lib:captions');
-  if (raw) {
-    try {
-      const lib = JSON.parse(raw);
-      if (Array.isArray(lib) && lib.length) return lib;
-    } catch { /* fall through to the built-in */ }
-  }
-  return DEFAULT_LIBRARY;
-}
-
-// Which caption groups suit which room. Ported from affinity() in
-// js/captions.js — the app ranks by usage as well, which a Worker has no sight
-// of, so this is the part that carries over.
-const AFFINITY = {
-  BATH: ['Plumbing', 'Tiling', 'Door & Window'],
-  KITCHEN: ['Plumbing', 'Tiling', 'Electrical'],
-  YARD: ['Plumbing', 'Metalwork'],
-  'CAR PORCH': ['Metalwork', 'General'],
-  EXTERNAL: ['Wall & Ceiling', 'Metalwork', 'Roofing'],
-  STAIR: ['Tiling', 'Wall & Ceiling'],
-  BEDROOM: ['Wall & Ceiling', 'Door & Window', 'Electrical'],
-  LIVING: ['Tiling', 'Electrical', 'Door & Window'],
-  DINING: ['Tiling', 'Electrical'],
-  ROOF: ['Roofing', 'Wall & Ceiling'],
-  CEILING: ['Roofing', 'Wall & Ceiling'],
-  DB: ['Electrical'],
-};
-
-/** The captions worth the tokens for this room, most likely first. Named as in
- * js/ai.js, where the same job is done against the app's own library. */
-function libraryHint(lib, sectionTitle) {
-  const sec = String(sectionTitle || '').toUpperCase();
-  const suited = new Set();
-  for (const key of Object.keys(AFFINITY)) {
-    if (sec.includes(key)) AFFINITY[key].forEach((g) => suited.add(g));
-  }
-  const flat = lib.flatMap((g) => g.items.map((t) => ({ group: g.group, text: t })));
-  const ranked = [
-    ...flat.filter((c) => suited.has(c.group)),
-    ...flat.filter((c) => !suited.has(c.group)),
-  ];
-  return ranked.slice(0, HINTS).map((c) => c.text.replace(/\n/g, ' / ')).join(' | ');
-}
-
-/* ------------------------- which models this key has ------------------------- */
-
-/*
- * Two model names were hardcoded here, and a real key could not see either of
- * them. Both were marked as resting on the first try and nothing was ever
- * captioned — with no error to look at, because a resting model is not a
- * failure. The app already learned this lesson and asks Google what the key
- * actually has; this is the same thing, ported, with the answer cached in KV so
- * a tick every two minutes does not ask afresh every time.
- */
-
-const USABLE = (m) => !/embedding|aqa|imagen|image-generation|tts|native-audio|live/.test(m);
-
-/** Every model this key can call generateContent on. */
-async function listModels(env, { refresh = false } = {}) {
-  if (!refresh) {
-    const raw = await env.BATCHES.get(MODELS_KEY);
-    if (raw) {
-      try {
-        const cached = JSON.parse(raw);
-        if (Array.isArray(cached) && cached.length) return cached;
-      } catch { /* fall through and ask again */ }
-    }
-  }
-
-  const found = [];
-  let url = `${HOST}?pageSize=200`;
-  for (let page = 0; page < 4 && url; page++) {
-    const res = await fetch(url, { headers: { 'x-goog-api-key': env.GEMINI_KEY } });
-    if (!res.ok) {
-      let detail = '';
-      try { detail = (await res.json()).error?.message || ''; } catch { /* non-JSON */ }
-      throw new Error(`Google refused the model list (${res.status}). ${detail}`.trim());
-    }
-    const data = await res.json();
-    for (const m of data.models || []) {
-      if ((m.supportedGenerationMethods || []).includes('generateContent')) {
-        found.push(String(m.name || '').replace(/^models\//, ''));
-      }
-    }
-    url = data.nextPageToken
-      ? `${HOST}?pageSize=200&pageToken=${encodeURIComponent(data.nextPageToken)}` : null;
-  }
-  found.sort();
-  if (found.length) {
-    await env.BATCHES.put(MODELS_KEY, JSON.stringify(found), { expirationTtl: MODELS_TTL });
-  }
-  return found;
-}
-
-/**
- * The closest model this key really has to the one we wanted.
- *
- * The rule that matters, same as in the app: when the key's list is known,
- * never hand back a name that is not on it. Returning the name we wished for is
- * how this failed — a 404 quoting a model nobody chose.
- */
-function resolve(wanted, available) {
-  const list = (available || []).filter(USABLE);
-  if (!list.length) return wanted;
-  if (list.includes(wanted)) return wanted;
-
-  const family = /lite/.test(wanted) ? 'lite' : /pro/.test(wanted) ? 'pro' : 'flash';
-  const pick = (test) => list.find(test);
-  const chosen = family === 'lite'
-    ? pick((m) => /flash/.test(m) && /lite/.test(m)) || pick((m) => /flash/.test(m))
-    : family === 'pro'
-      ? pick((m) => /pro/.test(m) && !/vision/.test(m)) || pick((m) => /flash/.test(m))
-      : pick((m) => /flash/.test(m) && !/lite/.test(m)) || pick((m) => /flash/.test(m));
-
-  return chosen || pick((m) => /gemini/.test(m)) || list[0];
-}
-
-/** What to try, in order, for this key. Cheapest first, then whatever else it has. */
-async function ladderFor(env) {
-  let available = [];
-  let error = '';
-  try {
-    available = await listModels(env);
-  } catch (err) {
-    // No list is not fatal: the names we know are still worth a try, and a key
-    // that cannot list may still generate.
-    error = err.message;
-  }
-  if (!available.length) return { ladder: WANTED.slice(), available, error };
-
-  const ladder = [];
-  for (const wanted of WANTED) {
-    const got = resolve(wanted, available);
-    if (got && !ladder.includes(got)) ladder.push(got);
-  }
-  // A key whose models are all named something unfamiliar still has models.
-  for (const m of available.filter(USABLE)) {
-    if (ladder.length >= LADDER_MAX) break;
-    if (!ladder.includes(m)) ladder.push(m);
-  }
-  return { ladder: ladder.slice(0, LADDER_MAX), available, error };
-}
-
-/* ------------------------- talking to Gemini ------------------------- */
-
-/** Chunked, because a byte-at-a-time loop over a photo is the expensive way. */
-function base64(bytes) {
-  let bin = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(bin);
-}
-
-/** Models rate-limited recently, so a tick does not walk into the same wall. */
-async function cooling(env) {
-  const raw = await env.BATCHES.get(COOLDOWN_KEY);
-  const map = raw ? JSON.parse(raw) : {};
-  const now = Date.now();
-  return {
-    ready: (m) => (map[m] || 0) < now,
-    rest: async (m) => {
-      map[m] = now + COOLDOWN_MS;
-      await env.BATCHES.put(COOLDOWN_KEY, JSON.stringify(map), { expirationTtl: 600 });
-    },
-  };
-}
-
-/**
- * One caption from one model.
- *
- * `plain` drops the two optional pieces some models refuse outright — the
- * system instruction, which Google also calls the developer instruction, and
- * the thinking budget. The rules are not lost: they go at the front of the
- * prompt, which every model reads.
- */
-async function ask(env, model, imageB64, prompt, plain = false) {
-  const parts = [{ inline_data: { mime_type: 'image/jpeg', data: imageB64 } }];
-  if (plain) parts.push({ text: `${SYSTEM}\n\n${prompt}` });
-  else parts.push({ text: prompt });
-
-  const body = {
-    contents: [{ role: 'user', parts }],
-    generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 32,
-      // Flash reasons before answering out of the same budget, which can leave
-      // a short caption with nothing left to say.
-      ...(!plain && /flash/i.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
-    },
-    ...(plain ? {} : { systemInstruction: { parts: [{ text: SYSTEM }] } }),
-  };
-
-  const res = await fetch(`${HOST}/${encodeURIComponent(model)}:generateContent`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_KEY },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    let detail = '';
-    try { detail = (await res.json()).error?.message || ''; } catch { /* non-JSON */ }
-    const err = new Error(`${res.status} ${detail}`.trim());
-    err.status = res.status;
-    // A rate limit or a model this key cannot see: step down the ladder.
-    err.step = res.status === 429 || res.status === 404;
-    // The model is fine but will not take part of the request: same model,
-    // simpler request.
-    err.plain = res.status === 400 && !plain
-      && /instruction|thinking|not enabled|not supported|unsupported/i.test(detail);
-    throw err;
-  }
-
-  const data = await res.json();
-  const reply = data.candidates?.[0]?.content?.parts || [];
-  return clean(reply.map((p) => p.text).filter(Boolean).join(''));
-}
-
-/* ------------------------- the pass ------------------------- */
-
-/**
- * Caption up to `max` photos that have none. Returns what it did, which is what
- * the cron log and the manual trigger report.
- */
-async function captionPending(env, max = 6, { rescan = false } = {}) {
-  if (!env.GEMINI_KEY) return { ok: false, reason: 'GEMINI_KEY is not set', done: 0 };
-
-  // One read, and usually the end of it. This runs every couple of minutes
-  // forever, so an idle tick has to cost as close to nothing as possible — in
-  // particular it must not list keys, which is the scarcest free allowance.
-  const codes = rescan ? await openCodes(env) : await batch.queueList(env);
-  // Say which list this looked at and what was on it. Without that, a rescan
-  // that found nothing and a tick that found nothing read identically, and
-  // there was no way to tell a repaired queue from a request whose &rescan=1
-  // never arrived.
-  const looked = { scanned: rescan ? 'every batch' : 'the queue', found: codes.length };
-  if (!codes.length) {
-    return { ok: true, ...looked, done: 0, failed: 0, remaining: 0, idle: true, errors: [] };
-  }
-
-  const lib = await library(env);
-  const cool = await cooling(env);
-  const { ladder, error: ladderError } = await ladderFor(env);
-  const out = { ok: true, ...looked, models: ladder, done: 0, failed: 0, remaining: 0, errors: [] };
-  if (ladderError) out.errors.push(ladderError);
-
-  for (const code of codes) {
-    // Summaries first, so finding the handful still to do costs one request
-    // rather than one per photo. Only the ones actually being captioned are
-    // then read in full.
-    const waiting = (await batch.listSummaries(env, code)).filter((p) => !p.tried);
-    if (!waiting.length) {
-      // Nothing left here: take it off the queue so later ticks cost one read.
-      await batch.queueRemove(env, code);
-      continue;
-    }
-    // A rescan is what you run when the queue has lost something — photos filed
-    // before the queue existed, or a write that did not land. Put it back, so
-    // the fix is permanent and nobody has to run this twice.
-    if (rescan) await batch.queueAdd(env, code);
-
-    for (const s of waiting) {
-      if (out.done + out.failed >= max) { out.remaining++; continue; }
-      try {
-        const photo = await batch.getPhoto(env, code, s.id);
-        if (!photo) continue;
-        await captionOne(env, code, photo, lib, cool, ladder);
-        out.done++;
-      } catch (err) {
-        out.failed++;
-        if (out.errors.length < 3) out.errors.push(err.message);
-        // Mark it tried so one unreadable photo cannot block the queue forever
-        // — but not when the only thing wrong was a rate limit, which is the
-        // ordinary outcome of forwarding two hundred photos at once and clears
-        // by itself. That one is left pending for the next tick.
-        if (!err.retry) await batch.updatePhoto(env, code, s.id, { aiCaption: '' });
-      }
-    }
-  }
-  return out;
-}
-
-async function captionOne(env, code, photo, lib, cool, ladder) {
-  // The variant nearest a Gemini tile, chosen when the photo arrived. Older
-  // batches only have the full-size one.
-  const file = await tg.openFile(env, photo.aiFileId || photo.fileId);
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const prompt = `Room: ${photo.section || 'unspecified'}\nLibrary: ${libraryHint(lib, photo.section)}`;
-  const img = base64(bytes);
-
-  let last = null;
-  for (const model of ladder) {
-    if (!cool.ready(model)) continue;
-    for (const plain of [false, true]) {
-      try {
-        const text = await ask(env, model, img, prompt, plain);
-        if (text) {
-          // Written straight from the record in hand: reading it back to patch
-          // it would cost an extra operation on every photo of every batch.
-          await batch.putPhoto(env, code, { ...photo, aiCaption: text, aiModel: model });
-          return text;
-        }
-        last = new Error('empty reply');
-        break;
-      } catch (err) {
-        last = err;
-        if (err.step) await cool.rest(model);
-        if (err.plain) continue;    // same model, without the parts it refused
-        if (!err.step) return Promise.reject(err);   // a real error: no model helps
-        break;
-      }
-    }
-  }
-  const err = last || new Error('every model is resting');
-  // Rate limits and resting models clear on their own, so the caller should
-  // leave the photo pending rather than writing it off.
-  if (!last || last.step) err.retry = true;
-  throw err;
-}
-
-/**
- * Caption one photo the moment it is filed, from the webhook that filed it.
- *
- * This is what makes an ordinary job — a few dozen photos — arrive already
- * written up, with no tick to wait for. It gives up cheaply and silently: the
- * photo is already on the queue, so anything not done here is done by the next
- * tick, and nothing about the bot's reply depends on it.
- */
-async function captionOnArrival(env, code, rec) {
-  if (!env.GEMINI_KEY || !rec || rec.caption) return null;
-
-  const cool = await cooling(env);
-  const { ladder } = await ladderFor(env);
-  // Gemini said "too fast" a moment ago and the rest of the burst is still
-  // coming. Stop before reading the library or downloading anything: every
-  // photo behind this one would otherwise pay for the same refusal.
-  if (!ladder.some((m) => cool.ready(m))) return null;
-
-  // Outside the try on purpose: only a failure to caption should write the photo
-  // off, never a storage hiccup reading the library.
-  const lib = await library(env);
-  try {
-    return await captionOne(env, code, rec, lib, cool, ladder);
-  } catch (err) {
-    if (!err.retry) await batch.updatePhoto(env, code, rec.id, { aiCaption: '' });
-    return null;
-  }
-}
-
-/** Every batch that still exists — the slow way, for a rescan. */
-async function openCodes(env) {
-  const codes = [];
-  let cursor;
-  do {
-    const page = await env.BATCHES.list({ prefix: 'batch:', cursor });
-    for (const k of page.keys) {
-      const m = /^batch:([A-Z0-9]+):meta$/.exec(k.name);
-      if (m) codes.push(m[1]);
-    }
-    cursor = page.list_complete ? null : page.cursor;
-  } while (cursor);
-  return codes;
-}
+const tg = { openFile, sendDocument, sendMessage, getFile, setWebhook, getMe, largest };
 
 /* ---------- bot.js ---------- */
 
 // What the site team sees. Every reply is one short line, because this is read
 // one-handed, outdoors, on a phone.
-
 
 
 
@@ -881,14 +407,9 @@ async function filePhoto(env, msg, chatId) {
   if (!msg.photo && !asDocument) return;              // a PDF or a voice note is not a defect
 
   const big = asDocument ? null : tg.largest(msg.photo);
-  // Telegram ships several sizes. Keep the biggest for the report and note the
-  // one nearest a Gemini tile, so captioning never downloads more than it needs
-  // — a Worker cannot resize, but it can choose.
-  const small = asDocument ? null : tg.pickSize(msg.photo, Number(env.CAPTION_PX) || 768);
   const rec = await batch.addPhoto(env, meta, {
     id: msg.message_id,
     fileId: asDocument ? msg.document.file_id : big.file_id,
-    aiFileId: asDocument ? msg.document.file_id : (small || big).file_id,
     caption: (msg.caption || '').trim(),
     takenAt: sentAt(msg) * 1000,
     takenSource: asDocument ? 'file' : 'telegram',
@@ -897,29 +418,13 @@ async function filePhoto(env, msg, chatId) {
     mediaGroupId: msg.media_group_id || '',
   });
 
-  // Write it up now, in the same breath as filing it. Telegram delivers every
-  // photo as its own request, so this costs one Gemini call per request rather
-  // than a queue anywhere, and a few dozen photos are captioned by the time the
-  // last one is forwarded.
-  //
-  // Started here but returned rather than handed to ctx.waitUntil: this whole
-  // function ALREADY runs inside the webhook's waitUntil, after the response
-  // has gone back to Telegram, and a waitUntil called from there is not
-  // something the runtime promises to honour — it can be dropped on the floor
-  // without a word. Part of the returned promise, it cannot be. It runs
-  // alongside the ack rather than delaying it, and failing changes nothing:
-  // the photo is on the queue and the tick sweeps up the rest.
-  const captioning = captionOnArrival(env, meta.code, rec).catch(() => {});
-
   // Album items arrive as separate updates seconds apart; acking each one would
   // bury the chat, so only the first of a group speaks.
-  if (!rec.mediaGroupId || firstOfGroup(rec, msg)) {
-    const photos = await batch.listSummaries(env, meta.code);
-    const n = photos.filter((p) => p.section === rec.section).length;
-    await tg.sendMessage(env, chatId, `✓ ${rec.section} · ${n}`,
-      { disable_notification: true });
-  }
-  return captioning;
+  if (rec.mediaGroupId && !firstOfGroup(rec, msg)) return;
+  const photos = await batch.listSummaries(env, meta.code);
+  const n = photos.filter((p) => p.section === rec.section).length;
+  return tg.sendMessage(env, chatId, `✓ ${rec.section} · ${n}`,
+    { disable_notification: true });
 }
 
 /**
@@ -946,15 +451,13 @@ async function listBatch(env, chatId) {
   const photos = await batch.listSummaries(env, meta.code);
   if (!photos.length) return tg.sendMessage(env, chatId, `${meta.project.name} — no photos yet.`);
   const lines = batch.tally(photos).map(([sec, n]) => `${sec} — ${n}`);
-  // The code and the caption count, not just the tally. A batch has a code from
-  // the moment it opens, but only /done used to say it, so checking on a job in
-  // progress meant finishing it first. The caption count is the other thing
-  // worth knowing before importing: how much is still being written up.
-  const written = photos.filter((p) => p.caption).length;
+  // The code as well as the tally. A batch has a code from the moment it opens,
+  // but only /done used to say it, so checking on a job in progress meant
+  // finishing it first.
   return tg.sendMessage(env, chatId, [
     meta.project.name,
     ...lines,
-    `${photos.length} photo(s), ${written} captioned.`,
+    `${photos.length} photo(s) total.`,
     `Code: ${meta.code}${meta.status === 'open' ? ' (still open — /done when finished)' : ''}`,
   ].join('\n'));
 }
@@ -1020,7 +523,13 @@ async function lastClosed(env, chatId) {
 // the report, and this holds a few kilobytes of "which photo, which section"
 // until the app collects them. That is what keeps it inside free plans with no
 // payment method on the account — see worker/README.md.
-
+//
+// It used to caption the photos too, and that was the mistake. Captioning meant
+// a second AI setup with its own key and its own model handling, a queue, and a
+// schedule to work through it — none of which could be seen from here when it
+// went wrong, and all of which had to be kept in step with the app's own
+// assistant. It is the app's job now. What is left has no schedule, no AI key
+// and no state beyond the batch itself: there is nothing here to go stale.
 
 
 
@@ -1038,16 +547,6 @@ const cors = () => ({
 });
 
 export default {
-  /** The safety net. Photos are captioned as they arrive (see filePhoto in
-   * bot.js); this sweeps up the ones Gemini was too busy to take, a few at a
-   * time, so a burst is written up by the time the office opens it. An idle
-   * tick reads one key and stops. */
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(captionPending(env, Number(env.CAPTION_PER_TICK) || 6)
-      .then((r) => console.log('caption tick', JSON.stringify(r)))
-      .catch((err) => console.error('caption tick failed', err)));
-  },
-
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';
@@ -1060,9 +559,9 @@ export default {
       // this answers it in one look.
       if (path === '/health') return json({ ok: true, build: buildStamp() });
 
-      // Everything the captioner looks at, in one place. Nothing here is a
-      // secret — codes, counts and whether a key is set, never its value — but
-      // it lists keys, so it is behind the webhook secret and never automatic.
+      // What the bot is holding, in one place. Nothing here is a secret — codes
+      // and counts only — but it lists keys, so it is behind the webhook secret
+      // and never automatic.
       if (path === '/api/status') {
         if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
           return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
@@ -1093,36 +592,6 @@ export default {
         return register(env, url);
       }
 
-      // Run the captioner by hand, for testing setup without waiting for a tick.
-      if (path === '/api/caption/run') {
-        if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
-          return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
-        }
-        // ?reset=1 forgets which models are resting and which the key has, for
-        // after replacing a key or fixing one. Both come back on their own
-        // within minutes; this is for not waiting.
-        if (url.searchParams.get('reset') === '1') {
-          await env.BATCHES.delete('ai:cooldown');
-          await env.BATCHES.delete('ai:models');
-        }
-        // ?rescan=1 finds work by scanning every key, for when the queue has
-        // been lost. It costs list operations, so it is never automatic.
-        return json(await captionPending(env, Number(url.searchParams.get('max')) || 6,
-          { rescan: url.searchParams.get('rescan') === '1' }));
-      }
-
-      // The office's caption library, pushed from the app so the bot hints the
-      // model with the same wording the report prints.
-      if (path === '/api/library' && request.method === 'POST') {
-        if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
-          return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
-        }
-        const lib = await request.json().catch(() => null);
-        if (!Array.isArray(lib) || !lib.length) return json({ ok: false, error: 'Expected a caption library array.' }, 400);
-        await env.BATCHES.put('lib:captions', JSON.stringify(lib));
-        return json({ ok: true, groups: lib.length, captions: lib.reduce((n, g) => n + (g.items || []).length, 0) });
-      }
-
       const manifestMatch = /^\/api\/batch\/([A-Z0-9]{4,16})$/.exec(path);
       if (manifestMatch) return serveManifest(env, manifestMatch[1]);
 
@@ -1144,16 +613,12 @@ export default {
 const buildStamp = () => (typeof BUILD_STAMP === 'string' ? BUILD_STAMP : 'dev');
 
 /**
- * Why captioning is or is not happening, answered from the stored state rather
- * than from what anyone believes is deployed.
- *
- * Every mystery so far has come down to one of these four: the wrong file is
- * pasted, the key is missing, the queue disagrees with what is actually
- * waiting, or a batch is not there at all. So: report all four together, and
- * say plainly which it is.
+ * What the bot is holding, answered from stored state rather than from what
+ * anyone believes is deployed. Kept after the captioner was taken out, because
+ * the thing it was really good for was never captions: it is the only way to
+ * see which build is live and which batches exist without importing them.
  */
 async function status(env) {
-  const queue = await batch.queueList(env);
   const codes = [];
   let cursor;
   do {
@@ -1174,75 +639,20 @@ async function status(env) {
       project: meta && meta.project ? meta.project.name : '',
       status: meta ? meta.status : 'missing',
       photos: photos.length,
-      // Split three ways, because "nothing waiting" meant both "all done" and
-      // "all given up on", and those want opposite reactions.
-      captioned: photos.filter((p) => p.caption).length,
-      blank: photos.filter((p) => p.tried && !p.caption).length,
-      waiting: photos.filter((p) => !p.tried).length,
-      queued: queue.includes(code),
-      sample: photos.filter((p) => p.caption).slice(0, 3).map((p) => p.caption),
+      typedCaptions: photos.filter((p) => p.caption).length,
     });
   }
 
-  const stranded = batches.filter((b) => b.waiting > 0 && !b.queued);
-  const cooldown = await env.BATCHES.get('ai:cooldown');
-  const cooling = cooldown ? JSON.parse(cooldown) : {};
-
-  // What the key can actually call, which is the one thing nothing else here
-  // could see: two hardcoded names that a key cannot reach look exactly like a
-  // model resting, and a resting model is not an error anyone can read.
-  let models = { ladder: [], available: [], error: 'no key' };
-  if (env.GEMINI_KEY) models = await ladderFor(env).catch((err) => ({ ladder: [], available: [], error: err.message }));
-
-  const now = Date.now();
+  const total = batches.reduce((n, b) => n + b.photos, 0);
   return {
     ok: true,
     build: buildStamp(),
-    geminiKeySet: !!env.GEMINI_KEY,
-    perTick: Number(env.CAPTION_PER_TICK) || 6,
-    queue,
     batches,
-    modelsTried: models.ladder,
-    modelsAvailable: models.available,
-    modelListError: models.error || undefined,
-    cooling: Object.fromEntries(Object.entries(cooling)
-      .map(([m, until]) => [m, until > now ? `resting ${Math.ceil((until - now) / 1000)}s` : 'ready'])),
-    diagnosis: diagnose(env, batches, stranded, models),
+    note: batches.length
+      ? `${batches.length} batch(es) waiting, ${total} photo(s) in total. `
+        + 'Import them from Projects > + > Import from Telegram; captions are written there.'
+      : 'Nothing is waiting. Send /project to the bot to start one.',
   };
-}
-
-function diagnose(env, batches, stranded, models) {
-  if (!env.GEMINI_KEY) {
-    return 'GEMINI_KEY is not set on this Worker, so nothing will ever be captioned. '
-      + 'Settings > Variables and Secrets > add it as a Secret, then Deploy.';
-  }
-  if (models.error && !models.available.length) {
-    return `Google would not say which models this key has: ${models.error} `
-      + 'Usually the key is wrong, or it is from a project without the Generative Language API on.';
-  }
-  if (!models.ladder.length) {
-    return 'This key has no model that can caption an image. Make a new key at '
-      + 'aistudio.google.com and replace GEMINI_KEY.';
-  }
-  const waiting = batches.reduce((n, b) => n + b.waiting, 0);
-  const blank = batches.reduce((n, b) => n + b.blank, 0);
-  const captioned = batches.reduce((n, b) => n + b.captioned, 0);
-  if (!waiting) {
-    if (blank && !captioned) {
-      return `Nothing is waiting, but all ${blank} photo(s) were given up on rather than `
-        + `captioned. Run /api/caption/run?secret=...&reset=1 and read the errors it reports.`;
-    }
-    return `Nothing is waiting: ${captioned} photo(s) captioned`
-      + `${blank ? `, ${blank} given up on` : ''}. Captioning uses ${models.ladder[0]}.`;
-  }
-  if (stranded.length) {
-    return `${waiting} photo(s) are waiting but ${stranded.length} batch(es) are not on the `
-      + 'queue, so the tick will never look at them. This happens to photos filed before the '
-      + 'queue existed. Run /api/caption/run?secret=...&rescan=1 once to pick them up.';
-  }
-  return `${waiting} photo(s) are waiting and queued, and this key can reach `
-    + `${models.ladder.join(', ')}. If they stay waiting, the cron trigger is not firing: `
-    + 'check Settings > Trigger Events for */2 * * * *.';
 }
 
 /**

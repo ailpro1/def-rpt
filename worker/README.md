@@ -10,7 +10,7 @@ which files them by section so the admin app can collect a whole job with an
 ## Why it stores nothing
 
 Photo bytes stay in Telegram. A `file_id` never expires for the bot, so this
-Worker keeps only "which photo, which section, which caption" — a couple of
+Worker keeps only "which photo, which section" — a couple of
 kilobytes per batch in Workers KV — and streams the bytes through on demand when
 the app asks.
 
@@ -20,11 +20,9 @@ That is a deliberate choice, not a shortcut:
   account before it can be enabled. Nothing here needs it.
 - **No base64 of photos anywhere.** The Workers free plan caps CPU per request;
   streaming a photo costs almost none, encoding one costs a lot.
-- **Two KV writes per photo at most** — one to file it, one to store its
-  caption. The test run files 8 photos and 9 commands in 17 writes. A
-  200-photo day is about 400, against a free allowance of 1,000; two such days
-  in one calendar day would be the first thing to run out, and captioning is
-  what stops, not collecting.
+- **One KV write per photo.** The test run files 8 photos and 9 commands in 15
+  writes, against a free allowance of 1,000 a day. Nothing writes on a schedule,
+  so an idle day costs nothing at all.
 
 **Before deploying, check these still hold** — they are what the design rests on:
 
@@ -32,7 +30,6 @@ That is a deliberate choice, not a shortcut:
 |---|---|
 | Workers | 100,000 requests/day, 10ms CPU per invocation |
 | Workers KV | 1,000 writes/day, 100,000 reads/day, 1GB |
-| Cron Triggers | 3 per account |
 
 If any of that has changed, stop and re-decide rather than reaching for a paid
 plan. The safest guarantee is the simplest one: **do not put a payment method on
@@ -94,7 +91,7 @@ into the bot, in whatever order suits you:
 /sec CAR PORCH                 file what follows under this section
 <forward the car porch photos> each one acked: ✓ CAR PORCH · 3
 /sec KITCHEN                   switch section
-/list                          counts so far, how many are captioned, and the code
+/list                          counts so far, and the code
 /undo                          drop the last photo
 /done                          closes it, replies with the import code
 /cancel                        throw it away
@@ -112,37 +109,23 @@ camera. The stored time only orders the photos and lets the app spot a batch
 that has landed on the wrong day, where the project screen offers to retime the
 lot to the inspection date.
 
-## How captioning runs
+## What it deliberately does not do
 
-Twice over, because one pass cannot cover both shapes of job.
+**It does not write captions.** It did, and that was the mistake worth
+recording. Captioning on the Worker meant a second AI key, a second model
+ladder, a queue of unfinished work and a cron trigger to chew through it — none
+of it visible from a dashboard, all of it needing to stay in step with the app's
+own assistant, and every failure silent. Two hardcoded model names that a real
+key could not reach put both on cooldown and captioned nothing for a day without
+raising a single error.
 
-**As each photo arrives.** Telegram delivers every photo as its own request, so
-the handler that files it also captions it — one Gemini call, inside the
-invocation that was happening anyway. A few dozen photos are written up by the
-time the last one is forwarded and `/done` has nothing to wait for.
+All of it is gone. The app holds one Anthropic key, writes every caption itself,
+and shows its progress while it does. What is left here has no schedule, no AI
+key and no state beyond the batch: there is nothing to go stale, nothing to
+spend an allowance while nobody is looking, and nothing to keep in step.
 
-**From a cron tick, every two minutes.** Google's free tier takes roughly
-fifteen requests a minute, so a couple of hundred photos forwarded in one go
-will mostly be turned away. A refusal is not a verdict: the photo stays pending
-and the batch stays on `queue:pending`, and the tick clears six at a time until
-the list is empty. Around 180 an hour, which finishes a 200-photo day inside the
-hour.
-
-**Which model.** Not a hardcoded name. The Worker asks Google what the key can
-actually call, caches that for six hours, and resolves the two it wants —
-cheapest flash first — against that list, extending with whatever else the key
-has up to three. Two hardcoded names once failed on a real key that had neither:
-both 404'd, both were marked as resting, and from then on every photo was
-skipped in silence, because a resting model is not an error anyone can read.
-
-The distinction that makes this work is between a failure that will clear and
-one that will not. A rate limit or a resting model leaves the photo pending; a
-403, an unreadable file or an empty answer marks it tried, so one bad photo
-cannot be retried for ever.
-
-An idle tick reads one key and stops — no listing. That matters: listings are
-the scarcest free allowance at 1,000 a day, and a tick that searched for work
-instead of reading a queue once had a real account blocked over a weekend.
+The bot still carries a caption the site team typed on a photo in Telegram —
+they were standing in front of it.
 
 ## API the app uses
 
@@ -153,27 +136,24 @@ instead of reading a queue once had a real account blocked over a weekend.
 | `POST /api/batch/:code/claim` | app has them; drop the batch |
 | `GET /health` | liveness, and which build is deployed |
 | `GET /tg/register?secret=…` | one-time: points Telegram at this Worker |
-| `GET /api/status?secret=…` | why captioning is or is not happening |
-| `GET /api/caption/run?secret=…` | caption now; `&rescan=1` also repairs the queue, `&reset=1` forgets the cached model list and any cooldown |
+| `GET /api/status?secret=…` | which build is live, and what the bot is holding |
 
 `/health` reports the build stamp that `worker/build.mjs` prints — the paste is
 the one step with no receipt, and an old file still running looks exactly like a
 new one. Compare the two before debugging anything else.
 
-`/api/status` answers the question the captioner cannot: it lists every batch,
-how many photos each is still waiting on, whether the queue agrees, and whether
-a key is set, then names which of those is the problem. It carries codes and
-counts, never a credential. It lists keys, so it is behind the secret and never
-runs on its own.
+`/api/status` lists every batch the bot is holding and what is in it, so "where
+did my photos go" is one look rather than an import. It carries codes and counts,
+never a credential. It lists keys, so it is behind the secret and never runs on
+its own.
 
 ## Tests
 
 ```sh
 node worker/build.mjs          # src/ -> dist/worker.js, the file you paste
-node worker/test/run.js          # 36 checks against the sources
-node worker/test/caption.test.js # 39 checks on captioning, against a stubbed Gemini
-node worker/test/bundle.test.js  # 32 checks against the built file
-node worker/test/scale.test.js   # 21 checks on what a 200-photo job costs
+node worker/test/run.js          # 39 checks against the sources
+node worker/test/bundle.test.js  # 42 checks against the built file
+node worker/test/scale.test.js   # 11 checks on what a 200-photo job costs
 ```
 
 `run.js` drives the real handlers against a fake KV and a stubbed Telegram — a
@@ -186,10 +166,9 @@ flattening mistake cannot slip through. No wrangler, no network, no account
 needed for either.
 
 `scale.test.js` counts storage operations rather than asserting behaviour: no
-path that runs per photo may cost more because the batch is bigger, and an idle
-cron tick must not list keys at all. Both rules were broken once and both broke
-something real — a half-imported 197-photo job, and an account whose storage was
-blocked over a quiet weekend.
+path that runs per photo may cost more because the batch is bigger. That rule
+was broken once and it broke something real — a 197-photo job that half-imported
+and then could not be fetched at all.
 
 `python3 worker/test/e2e.py` goes further: the real Worker on one port and the
 built admin app on another, driven in headless Chromium, so a batch really does

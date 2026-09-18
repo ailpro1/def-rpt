@@ -50,7 +50,7 @@ searched on its own.
 - **Annotation** — circle, arrow, box, freehand, text, dot; six colours, three widths,
   undo/clear. Strokes are stored as normalised vectors, so a photo stays re-editable
   and re-renders at any size. A flattened JPEG is generated for the report and sharing.
-- **AI assistant** (optional, online) — Google AI Studio (Gemini). Suggests a caption
+- **AI assistant** (optional, online) — Claude. Suggests a caption
   from the photo, captions batches, drafts the executive summary from the recorded
   items, and answers questions about the inspection. Picks the model itself and is
   built to stay inside the free tier. Everything else works with no connection.
@@ -295,7 +295,7 @@ js/db.js                IndexedDB wrapper
 js/store.js             projects / sections / photos / settings
 js/image.js             decode, downscale, annotate render, flatten
 js/captions.js          default caption + section library, offline ranker
-js/ai.js                Google AI Studio (Gemini) calls (optional)
+js/ai.js                Claude Messages API calls (optional)
 js/backup.js            export / import / share
 js/ui.js                DOM helpers, sheets, alerts, rows
 js/screens/*.js         one module per screen
@@ -323,70 +323,72 @@ tools/build.mjs         builds dist/admin, dist/site and the chooser
 
 ## AI assistant setup
 
-Settings → Assistant → AI assistant. Enable it, paste a Google AI Studio key
-(`AIza…`, from [aistudio.google.com](https://aistudio.google.com)), and tap
-**Test connection**.
+Settings → Assistant → AI assistant. Enable it, paste an Anthropic API key
+(`sk-ant-…`, from [console.anthropic.com](https://console.anthropic.com)), and
+tap **Test connection**.
 
-### Model selection
+The app calls the Messages API straight from the browser, with
+`anthropic-dangerous-direct-browser-access`. That header's name is a warning
+about the usual case — a public site shipping one shared key to strangers.
+Here the key is the office's own, typed into their own app on their own device,
+which is the same footing as any desktop tool. It never leaves the browser
+except as a request header to `api.anthropic.com`, and it is **excluded from
+backup files**.
 
-**Test connection** asks your key which models it has (`GET /v1beta/models`), keeps
-the list, and offers it as the presets. Model names change over time and differ
-between keys, so nothing is hardcoded as fact — the ladder below is a preference
-order, and the stored list is the source of truth.
+### One model, on purpose
 
-**Choose model automatically** is on by default. Each job asks for the cheapest model
-that can do it; the request is then resolved to the closest model the key really has
-(by family — lite, flash, pro), and steps to the next one by itself when a model is
-rate limited, missing or returns nothing:
+`claude-haiku-4-5`, named once in `js/assist.js`. Not a setting, and not chosen
+at runtime.
 
-| Job | Preference |
+The app used to ask the key which models it could reach, resolve a preference
+ladder against that list, and step down it on a refusal — about two hundred
+lines of it, all there to survive a free tier. It failed three times in a week
+and twice did so silently, because a model that has been put on cooldown is not
+an error anyone can read. A paid key on a model that will still be there next
+month needs none of it: one request shape, and one retry for the one failure
+that is genuinely transient.
+
+The trade is explicit. If Anthropic retires this model, captions stop until the
+constant is changed. That is a loud failure with an obvious fix, which is the
+better of the two ways to be wrong here.
+
+### What it costs
+
+Roughly 1,000 input tokens per photo — about 600 for the image at 768px, the
+rest prompt and library — and around 20 tokens of caption back.
+
+| | |
 |---|---|
-| Single caption | lite → flash |
-| Batch captions | flash → lite |
-| Summary, chat | flash → lite |
+| 200-photo inspection | ~US$0.22 |
+| 20 such inspections a month | ~US$4.40 |
 
-So a key that has `gemini-flash-lite-latest` but not `gemini-2.5-flash-lite` still
-works, with no configuration. A model that genuinely does not exist is reported as
-such rather than retried.
-
-A model that returns 429 is put on a 90-second cooldown and skipped until it clears.
-After the ladder is exhausted the app waits 4 seconds and retries once, because
-free-tier limits are per minute. Turn the switch off to pin one model instead.
-
-### Staying inside the free tier
-
-The assistant is built to send as little as possible:
+The app still sends as little as it sensibly can, because the same measures that
+save money also keep responses fast:
 
 | Measure | Effect |
 |---|---|
-| Photos downscaled to 768px before sending | Fits one Gemini image tile — about a quarter of the tokens the 1600px report copy would cost |
+| Photos downscaled to 768px before sending | Claude bills an image by its area; the 1600px report copy costs about four times as much and reads no better for a defect |
 | Caption library trimmed to the 24 most likely for that room | Instead of the whole library on every request |
 | Batched 8 photos per request | System prompt and library paid for once, not eight times |
-| Reply capped at ~24 tokens per caption, thinking off on Flash | A four-word caption cannot run long |
 | Repeated captions collapsed to `UNFILLED GROUT x7` | Summary and chat context stay small on big jobs |
 | Already-captioned photos skipped | Re-running a batch only fills the gaps |
 
-Captions are written to the database **as each batch of 8 lands**, so a rate limit
-part-way through a long section keeps everything already done.
+Captions are written to the database **as each batch of 8 lands**, so stopping
+part-way through a long section keeps everything already paid for.
 
 Settings → Capture → **AI photo detail** (Low / Standard / High) trades tokens
-against how much fine detail the model can see. Standard (768px) suits most defect
-work; use High for hairline cracks.
+against how much fine detail the model can see. Standard (768px) suits most
+defect work; use High for hairline cracks.
 
-A typical 3–4 hour inspection — 150 photos — is roughly 20 requests.
-
-The key is stored on that device only, is sent to `generativelanguage.googleapis.com`
-and nowhere else, and is **excluded from backup files**. Without a key the app falls
-back to offline suggestions from the caption library.
-
-Google may use free-tier requests to improve their models. Use a billed key for
-client photos that must stay private.
+Anthropic does not train on API requests, so client photos stay yours. Without a
+key the app falls back to offline suggestions from the caption library.
 
 ### Using a different provider
 
-Only `callModel()` and the small `imagePart()` helper in `js/ai.js` are
-Gemini-specific. Every feature builds provider-neutral prompts, so swapping to
-another vision model is a change to those two functions plus the model ladder.
+`once()` in `js/ai.js` is the only function that knows the request shape, and
+`MODEL` in `js/assist.js` is the only place a model is named. Every feature
+builds provider-neutral prompts, so moving to another vision model is a change
+to those two.
 
 ## Android and iOS
 

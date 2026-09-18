@@ -59,22 +59,6 @@ export async function claimBatch(code) {
   }
 }
 
-/**
- * Send the caption library to the bot, so it hints the model with the office's
- * own wording rather than the list built into the Worker.
- */
-export async function pushLibrary(secret) {
-  const s = await getSettings();
-  const res = await call(`${await base()}/api/library?secret=${encodeURIComponent(secret)}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(s.captionLib || []),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.ok) throw new Error(data.error || `The bot answered ${res.status}.`);
-  return data;
-}
-
 export async function testConnection(url) {
   const root = String(url || '').trim().replace(/\/+$/, '');
   if (!secure(root)) throw new Error('The address must start with https://');

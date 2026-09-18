@@ -4,9 +4,15 @@
 // the report, and this holds a few kilobytes of "which photo, which section"
 // until the app collects them. That is what keeps it inside free plans with no
 // payment method on the account — see worker/README.md.
+//
+// It used to caption the photos too, and that was the mistake. Captioning meant
+// a second AI setup with its own key and its own model handling, a queue, and a
+// schedule to work through it — none of which could be seen from here when it
+// went wrong, and all of which had to be kept in step with the app's own
+// assistant. It is the app's job now. What is left has no schedule, no AI key
+// and no state beyond the batch itself: there is nothing here to go stale.
 
 import { handleUpdate } from './bot.js';
-import { captionPending, ladderFor } from './caption.js';
 import * as tg from './telegram.js';
 import * as batch from './batch.js';
 
@@ -23,16 +29,6 @@ const cors = () => ({
 });
 
 export default {
-  /** The safety net. Photos are captioned as they arrive (see filePhoto in
-   * bot.js); this sweeps up the ones Gemini was too busy to take, a few at a
-   * time, so a burst is written up by the time the office opens it. An idle
-   * tick reads one key and stops. */
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(captionPending(env, Number(env.CAPTION_PER_TICK) || 6)
-      .then((r) => console.log('caption tick', JSON.stringify(r)))
-      .catch((err) => console.error('caption tick failed', err)));
-  },
-
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';
@@ -45,9 +41,9 @@ export default {
       // this answers it in one look.
       if (path === '/health') return json({ ok: true, build: buildStamp() });
 
-      // Everything the captioner looks at, in one place. Nothing here is a
-      // secret — codes, counts and whether a key is set, never its value — but
-      // it lists keys, so it is behind the webhook secret and never automatic.
+      // What the bot is holding, in one place. Nothing here is a secret — codes
+      // and counts only — but it lists keys, so it is behind the webhook secret
+      // and never automatic.
       if (path === '/api/status') {
         if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
           return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
@@ -78,36 +74,6 @@ export default {
         return register(env, url);
       }
 
-      // Run the captioner by hand, for testing setup without waiting for a tick.
-      if (path === '/api/caption/run') {
-        if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
-          return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
-        }
-        // ?reset=1 forgets which models are resting and which the key has, for
-        // after replacing a key or fixing one. Both come back on their own
-        // within minutes; this is for not waiting.
-        if (url.searchParams.get('reset') === '1') {
-          await env.BATCHES.delete('ai:cooldown');
-          await env.BATCHES.delete('ai:models');
-        }
-        // ?rescan=1 finds work by scanning every key, for when the queue has
-        // been lost. It costs list operations, so it is never automatic.
-        return json(await captionPending(env, Number(url.searchParams.get('max')) || 6,
-          { rescan: url.searchParams.get('rescan') === '1' }));
-      }
-
-      // The office's caption library, pushed from the app so the bot hints the
-      // model with the same wording the report prints.
-      if (path === '/api/library' && request.method === 'POST') {
-        if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
-          return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
-        }
-        const lib = await request.json().catch(() => null);
-        if (!Array.isArray(lib) || !lib.length) return json({ ok: false, error: 'Expected a caption library array.' }, 400);
-        await env.BATCHES.put('lib:captions', JSON.stringify(lib));
-        return json({ ok: true, groups: lib.length, captions: lib.reduce((n, g) => n + (g.items || []).length, 0) });
-      }
-
       const manifestMatch = /^\/api\/batch\/([A-Z0-9]{4,16})$/.exec(path);
       if (manifestMatch) return serveManifest(env, manifestMatch[1]);
 
@@ -129,16 +95,12 @@ export default {
 const buildStamp = () => (typeof BUILD_STAMP === 'string' ? BUILD_STAMP : 'dev');
 
 /**
- * Why captioning is or is not happening, answered from the stored state rather
- * than from what anyone believes is deployed.
- *
- * Every mystery so far has come down to one of these four: the wrong file is
- * pasted, the key is missing, the queue disagrees with what is actually
- * waiting, or a batch is not there at all. So: report all four together, and
- * say plainly which it is.
+ * What the bot is holding, answered from stored state rather than from what
+ * anyone believes is deployed. Kept after the captioner was taken out, because
+ * the thing it was really good for was never captions: it is the only way to
+ * see which build is live and which batches exist without importing them.
  */
 async function status(env) {
-  const queue = await batch.queueList(env);
   const codes = [];
   let cursor;
   do {
@@ -159,75 +121,20 @@ async function status(env) {
       project: meta && meta.project ? meta.project.name : '',
       status: meta ? meta.status : 'missing',
       photos: photos.length,
-      // Split three ways, because "nothing waiting" meant both "all done" and
-      // "all given up on", and those want opposite reactions.
-      captioned: photos.filter((p) => p.caption).length,
-      blank: photos.filter((p) => p.tried && !p.caption).length,
-      waiting: photos.filter((p) => !p.tried).length,
-      queued: queue.includes(code),
-      sample: photos.filter((p) => p.caption).slice(0, 3).map((p) => p.caption),
+      typedCaptions: photos.filter((p) => p.caption).length,
     });
   }
 
-  const stranded = batches.filter((b) => b.waiting > 0 && !b.queued);
-  const cooldown = await env.BATCHES.get('ai:cooldown');
-  const cooling = cooldown ? JSON.parse(cooldown) : {};
-
-  // What the key can actually call, which is the one thing nothing else here
-  // could see: two hardcoded names that a key cannot reach look exactly like a
-  // model resting, and a resting model is not an error anyone can read.
-  let models = { ladder: [], available: [], error: 'no key' };
-  if (env.GEMINI_KEY) models = await ladderFor(env).catch((err) => ({ ladder: [], available: [], error: err.message }));
-
-  const now = Date.now();
+  const total = batches.reduce((n, b) => n + b.photos, 0);
   return {
     ok: true,
     build: buildStamp(),
-    geminiKeySet: !!env.GEMINI_KEY,
-    perTick: Number(env.CAPTION_PER_TICK) || 6,
-    queue,
     batches,
-    modelsTried: models.ladder,
-    modelsAvailable: models.available,
-    modelListError: models.error || undefined,
-    cooling: Object.fromEntries(Object.entries(cooling)
-      .map(([m, until]) => [m, until > now ? `resting ${Math.ceil((until - now) / 1000)}s` : 'ready'])),
-    diagnosis: diagnose(env, batches, stranded, models),
+    note: batches.length
+      ? `${batches.length} batch(es) waiting, ${total} photo(s) in total. `
+        + 'Import them from Projects > + > Import from Telegram; captions are written there.'
+      : 'Nothing is waiting. Send /project to the bot to start one.',
   };
-}
-
-function diagnose(env, batches, stranded, models) {
-  if (!env.GEMINI_KEY) {
-    return 'GEMINI_KEY is not set on this Worker, so nothing will ever be captioned. '
-      + 'Settings > Variables and Secrets > add it as a Secret, then Deploy.';
-  }
-  if (models.error && !models.available.length) {
-    return `Google would not say which models this key has: ${models.error} `
-      + 'Usually the key is wrong, or it is from a project without the Generative Language API on.';
-  }
-  if (!models.ladder.length) {
-    return 'This key has no model that can caption an image. Make a new key at '
-      + 'aistudio.google.com and replace GEMINI_KEY.';
-  }
-  const waiting = batches.reduce((n, b) => n + b.waiting, 0);
-  const blank = batches.reduce((n, b) => n + b.blank, 0);
-  const captioned = batches.reduce((n, b) => n + b.captioned, 0);
-  if (!waiting) {
-    if (blank && !captioned) {
-      return `Nothing is waiting, but all ${blank} photo(s) were given up on rather than `
-        + `captioned. Run /api/caption/run?secret=...&reset=1 and read the errors it reports.`;
-    }
-    return `Nothing is waiting: ${captioned} photo(s) captioned`
-      + `${blank ? `, ${blank} given up on` : ''}. Captioning uses ${models.ladder[0]}.`;
-  }
-  if (stranded.length) {
-    return `${waiting} photo(s) are waiting but ${stranded.length} batch(es) are not on the `
-      + 'queue, so the tick will never look at them. This happens to photos filed before the '
-      + 'queue existed. Run /api/caption/run?secret=...&rescan=1 once to pick them up.';
-  }
-  return `${waiting} photo(s) are waiting and queued, and this key can reach `
-    + `${models.ladder.join(', ')}. If they stay waiting, the cron trigger is not firing: `
-    + 'check Settings > Trigger Events for */2 * * * *.';
 }
 
 /**

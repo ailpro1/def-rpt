@@ -148,9 +148,9 @@ export async function ingest(file, { maxPx = 1600, quality = 0.82, thumbPx = 320
 }
 
 /**
- * Small copy for the assistant. Gemini bills images in 768x768 tiles, so a photo
- * that fits inside one tile costs about a quarter of what the 1600px report copy
- * costs, with no useful loss for four-word captions.
+ * Small copy for the assistant. Claude bills an image by its area, so a photo
+ * sent at 768px costs about a quarter of what the 1600px report copy costs, with
+ * no useful loss for four-word captions.
  */
 export async function aiCopy(blob, maxPx = 768, quality = 0.72) {
   const bmp = await decode(blob);

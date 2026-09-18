@@ -26,11 +26,6 @@ export async function claimBatch(code) {
   return (await net()).claimBatch(code);
 }
 
-export async function pushLibrary(secret) {
-  if (!intakeEnabled) throw new Error('Import is not part of this app.');
-  return (await net()).pushLibrary(secret);
-}
-
 export async function testConnection(url) {
   if (!intakeEnabled) throw new Error('Import is not part of this app.');
   return (await net()).testConnection(url);

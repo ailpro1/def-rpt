@@ -5,8 +5,8 @@ import { ingest, blobUrl } from '../image.js';
 import { exportBackup, importBackup, backupFilename, saveFile } from '../backup.js';
 import { BUILD } from '../build.js';
 import { updateWaiting, applyUpdate } from '../app.js';
-import { ask, listModels, modelFor, DEFAULT_MODEL, aiEnabled } from '../assist.js';
-import { intakeEnabled, testConnection, pushLibrary } from '../intake.js';
+import { ask, MODEL, aiEnabled } from '../assist.js';
+import { intakeEnabled, testConnection } from '../intake.js';
 
 export default async function renderSettings() {
   let s = await getSettings(true);
@@ -66,8 +66,9 @@ export default async function renderSettings() {
   }
 
   /**
-   * The bot's address is all this needs — the Telegram token and the Gemini key
-   * live on the Worker and never come near the phone.
+   * The bot's address is all this needs — the Telegram token lives on the
+   * Worker and never comes near the phone. The Worker holds no AI key at all
+   * any more: captioning happens here, in the app.
    */
   async function intakeSheet() {
     let url = s.intake.url || '';
@@ -95,25 +96,6 @@ export default async function renderSettings() {
             }
           },
         })),
-      ui.group('Captions', [
-        ui.row({
-          title: 'Send caption library to the bot',
-          sub: 'So it writes captions in your wording, not the built-in list',
-          chevron: true,
-          onclick: async () => {
-            const secret = await ui.prompt('Bot secret',
-              'The TG_WEBHOOK_SECRET you set on the Worker. It is only used to '
-              + 'prove this is you, and is not stored.', '', { okLabel: 'Send' });
-            if (!secret) return;
-            try {
-              const r = await pushLibrary(secret.trim());
-              ui.toast(`Sent ${r.captions} captions in ${r.groups} groups`, 2600);
-            } catch (err) {
-              ui.alert('Could not send the library', err.message);
-            }
-          },
-        }),
-      ]),
       ui.h('div', { class: 'group-note',
         text: 'Setting it up is written out in worker/SETUP.md. Photos are collected by the bot, '
           + 'then pulled into a project from Projects > + > Import from Telegram.' }),
@@ -161,69 +143,27 @@ export default async function renderSettings() {
     const draft = { ...s.ai };
     const resolveKey = () => (draft.key.startsWith('••') ? s.ai.key : draft.key.trim());
 
-    const modelRow = ui.inputRow('Model', draft.model, (v) => { draft.model = v; }, { placeholder: DEFAULT_MODEL });
-    const modelField = modelRow.querySelector('input');
-
-    // Presets come from what the key actually has, not from a hardcoded list:
-    // model names change, and they differ between keys.
-    const presets = ui.h('div', { class: 'chips scrollrow' });
-    const paintPresets = () => {
-      ui.clear(presets);
-      const list = (draft.available || []).filter((m) => !/embedding|aqa|imagen|image-generation|tts|native-audio|live/.test(m));
-      if (!list.length) {
-        presets.appendChild(ui.h('div', { class: 'hint', style: { padding: '0 4px' },
-          text: 'Only needed if you turn off automatic choice \u2014 tap Test connection to '
-            + 'list this key\u2019s models. On auto, the app looks them up itself.' }));
-        return;
-      }
-      list.forEach((m) => presets.appendChild(ui.h('button', {
-        class: 'chip', text: m,
-        onclick: () => { draft.model = m; modelField.value = m; ui.haptic(); },
-      })));
-    };
-    paintPresets();
-
-    // Auto mode picks the cheapest model that can do each job and steps to
-    // another one by itself when a model is rate limited or unavailable.
-    const manual = ui.h('div', {}, modelRow, presets);
-    const syncAuto = () => {
-      const on = draft.auto !== false;
-      manual.style.opacity = on ? '.4' : '1';
-      manual.style.pointerEvents = on ? 'none' : 'auto';
-    };
-    const autoRow = ui.switchRow('Choose model automatically', draft.auto !== false,
-      (v) => { draft.auto = v; syncAuto(); },
-      'Cheapest first, matched to what your key has; falls back on rate limits. '
-      + 'Finds the models itself \u2014 no need to test first');
-
+    // No model picker, no auto switch, no presets. Which model to use was a
+    // setting because a free key could not be relied on to have any particular
+    // one, and the app had to discover and step between them. It is a constant
+    // in the code now: one fewer thing to choose, and one fewer thing that can
+    // stop working without saying so.
     const testBtn = ui.h('button', { class: 'btn tinted wide' }, ui.h('span', { text: 'Test connection' }));
     testBtn.onclick = async () => {
       const label = testBtn.querySelector('span');
       const key = resolveKey();
       if (!key) { ui.toast('Enter an API key first'); return; }
       testBtn.disabled = true;
+      label.textContent = 'Testing\u2026';
       const prev = { ...s.ai };
       try {
-        // Ask the key what it has, then prove one of those models answers.
-        label.textContent = 'Reading models\u2026';
         await set({ ai: { ...draft, key, enabled: true } });
-        const models = await listModels();
-        if (!models.length) throw new Error('This key has no models that can generate content.');
-        draft.available = models;
-        await set({ ai: { ...draft, key, enabled: true, available: models, checkedAt: Date.now() } });
-        paintPresets();
-
-        label.textContent = 'Testing\u2026';
-        const used = await modelFor('text');
         const reply = await ask('Reply with the single word OK.');
         if (!reply) throw new Error('The model returned nothing.');
-        await set({ ai: { ...draft, key, enabled: true, available: models, checkedAt: Date.now() } });
-        ui.alert('Connected', `${models.length} model(s) available. Answered on ${used}.`);
+        await set({ ai: { ...draft, key, enabled: true, checkedAt: Date.now() } });
+        ui.alert('Connected', `${MODEL} answered.`);
       } catch (err) {
-        // Keep whatever was learned. Restoring the old settings wholesale threw
-        // away the model list that had just been fetched, so the next attempt
-        // started blind and failed the same way — for ever.
-        await set({ ai: { ...prev, key, available: draft.available || prev.available || [] } });
+        await set({ ai: { ...prev, key } });
         ui.alert('Test failed', err.message);
       }
       label.textContent = 'Test connection';
@@ -232,17 +172,15 @@ export default async function renderSettings() {
 
     const body2 = ui.h('div', {},
       ui.h('div', { class: 'hint', text: 'The assistant suggests captions from your photos, captions a batch in one go, drafts the executive summary and answers questions about the inspection. It needs a connection; everything else in the app works offline.' }),
-      ui.group('Google AI Studio', [
+      ui.group('Claude', [
         ui.switchRow('Enable assistant', draft.enabled, (v) => { draft.enabled = v; }),
-        ui.inputRow('API key', draft.key ? '••••••••' + draft.key.slice(-4) : '', (v) => { draft.key = v; }, { placeholder: 'AIza…' }),
-        autoRow,
+        ui.inputRow('API key', draft.key ? '••••••••' + draft.key.slice(-4) : '', (v) => { draft.key = v; }, { placeholder: 'sk-ant-…' }),
+        ui.row({ title: 'Model', sub: MODEL }),
       ]),
-      manual,
       ui.h('div', { class: 'btn-stack' }, testBtn),
-      ui.h('div', { class: 'group-note', text: 'Get a key at aistudio.google.com. It is stored on this device only, sent to Google with each request, and is never included in a backup file.' }),
-      ui.h('div', { class: 'group-note', text: 'Free-tier keys are rate limited and Google may use free-tier requests to improve their models. Use a billed key for client photos that must stay private.' }));
+      ui.h('div', { class: 'group-note', text: 'Get a key at console.anthropic.com. It is stored on this device only, sent to Anthropic with each request, and is never included in a backup file.' }),
+      ui.h('div', { class: 'group-note', text: 'This is a paid key \u2014 around 20 US cents for a 200-photo inspection. Anthropic does not train on API requests, so client photos stay yours.' }));
 
-    syncAuto();
     ui.sheet({
       title: 'AI Assistant', body: body2, rightLabel: 'Save',
       onRight: async () => {
@@ -390,11 +328,7 @@ export default async function renderSettings() {
     if (aiEnabled) body.appendChild(ui.group('Assistant', [
       ui.row({
         title: 'AI assistant',
-        sub: s.ai.enabled && s.ai.key
-          ? (s.ai.auto !== false
-            ? `Google AI Studio · auto${(s.ai.available || []).length ? ` · ${s.ai.available.length} models` : ''}`
-            : `Google AI Studio · ${s.ai.model}`)
-          : 'Google AI Studio (Gemini)',
+        sub: s.ai.enabled && s.ai.key ? MODEL : 'Claude — needs an API key',
         value: s.ai.enabled && s.ai.key ? 'On' : 'Off',
         iconName: 'sparkle', iconColor: 'var(--sys-indigo)',
         chevron: true, onclick: aiSheet,

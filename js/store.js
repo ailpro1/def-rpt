@@ -37,13 +37,14 @@ export const DEFAULT_SETTINGS = {
   stampInShare: true,
   imageMaxPx: BUILD.defaultImageMaxPx || 1600,
   imageQuality: 0.82,
-  aiImagePx: 768,          // one Gemini image tile — cheapest useful size
+  aiImagePx: 768,          // Claude bills an image by its area; 768px reads a defect fine
   captionLib: DEFAULT_CAPTIONS,
   sectionLib: DEFAULT_SECTIONS,
   componentLib: DEFAULT_COMPONENTS,
   usage: {},              // caption text -> {n,last,sections{}}
   libSeedVersion: LIB_SEED_VERSION,
-  ai: { key: '', model: 'gemini-2.5-flash', enabled: false, auto: true, available: [], checkedAt: null },
+  // The model is a constant in the code, not a setting: see js/assist.js.
+  ai: { key: '', enabled: false, checkedAt: null },
   // Telegram intake: the Worker's address and the last code used.
   intake: { url: '', lastCode: '' },
   lastBackupAt: null,

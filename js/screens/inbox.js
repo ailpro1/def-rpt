@@ -8,10 +8,12 @@ import { go } from '../app.js';
 import {
   getSettings, saveSettings, listProjects, createProject, getProject,
   listSections, createSection, addPhoto, updatePhoto, listProjectPhotos,
+  noteCaptionUse, getBlob,
 } from '../store.js';
 import { matchSection } from '../captions.js';
 import { ingest } from '../image.js';
 import { fetchManifest, fetchPhoto, claimBatch, readManifestFile } from '../intake.js';
+import { suggestCaptionsBatch, aiReady } from '../assist.js';
 
 const SKIP = '__skip__';
 const NEW_PROJECT = '__new__';
@@ -153,6 +155,9 @@ export default async function renderInbox(initialCode = '') {
       let done = 0;
       let skipped = 0;
       const failed = [];
+      // What will need writing up, grouped later by room: the bot brings the
+      // photos and whatever the site team typed, and nothing else.
+      const uncaptioned = [];
 
       for (const incoming of sections) {
         const title = mapping.get(incoming.title);
@@ -185,6 +190,7 @@ export default async function renderInbox(initialCode = '') {
               name: `tg-${photo.id}.jpg`,
             });
             if (photo.caption) await updatePhoto(added.id, { caption: photo.caption });
+            else uncaptioned.push({ id: added.id, blobId: added.blobId, sectionTitle: section.title });
           } catch (err) {
             console.error(err);
             failed.push(photo.id);
@@ -208,6 +214,7 @@ export default async function renderInbox(initialCode = '') {
           ? `${landed} added, ${skipped} already here`
           : `${total} photo${total === 1 ? '' : 's'} imported`, 2600);
       }
+      await offerCaptions(uncaptioned);
       go(`#/project/${projectId}`);
     } catch (err) {
       console.error(err);
@@ -219,6 +226,61 @@ export default async function renderInbox(initialCode = '') {
   }
 
   /* ---------------- painting ---------------- */
+
+  /**
+   * Write up what just landed, if the office wants it now.
+   *
+   * Captioning used to happen on the Worker before the photos ever reached the
+   * app, which meant a second AI setup nobody could see into when it stopped.
+   * Here the model is the same one the rest of the app uses, the progress is
+   * visible, and a failure costs nothing: the photos are already imported and
+   * every section still has its own caption button.
+   */
+  async function offerCaptions(list) {
+    if (!list.length || !(await aiReady())) return;
+    const ok = await ui.confirm('Write the captions?',
+      `${list.length} photo${list.length === 1 ? '' : 's'} came in without one. `
+      + 'The assistant can draft them now — you review and edit afterwards.',
+      { okLabel: 'Caption them' });
+    if (!ok) return;
+
+    // Room by room: the section name is most of what makes a caption right, and
+    // it is what the library is ranked against.
+    const byRoom = new Map();
+    for (const p of list) {
+      if (!byRoom.has(p.sectionTitle)) byRoom.set(p.sectionTitle, []);
+      byRoom.get(p.sectionTitle).push(p);
+    }
+
+    let saved = 0;
+    const total = list.length;
+    try {
+      for (const [title, group] of byRoom) {
+        const items = [];
+        for (const p of group) items.push({ id: p.id, blob: await getBlob(p.blobId) });
+        await suggestCaptionsBatch(items, {
+          sectionTitle: title,
+          // Written as each batch lands, so stopping part-way never throws away
+          // the captions already paid for.
+          onProgress: async (_done, _n, results, start) => {
+            for (let i = 0; i < results.length; i++) {
+              const text = results[i].text;
+              if (!text) continue;
+              await updatePhoto(items[start + i].id, { caption: text });
+              await noteCaptionUse(text, title);
+              saved++;
+            }
+            ui.toast(`Captioning ${saved} of ${total}\u2026`, 120000);
+          },
+        });
+      }
+      ui.toast(saved ? `${saved} caption(s) drafted \u2014 review before reporting` : 'No captions returned', 3000);
+    } catch (err) {
+      ui.toast(saved
+        ? `Stopped after ${saved} \u2014 ${err.message}`
+        : (err.message || 'The assistant is unavailable'), 5000);
+    }
+  }
 
   async function pickTarget() {
     const actions = [
@@ -280,7 +342,9 @@ export default async function renderInbox(initialCode = '') {
     }
 
     const total = manifest.sections.reduce((n, s) => n + s.photos.length, 0);
-    const captioned = manifest.sections.reduce(
+    // Only the captions the site team typed in Telegram. The bot does not write
+    // any: captioning is the app's job, offered once the photos are in.
+    const typed = manifest.sections.reduce(
       (n, s) => n + s.photos.filter((p) => p.caption).length, 0);
     // What the button will actually add: selected sections, less anything a
     // previous run already brought in.
@@ -288,23 +352,15 @@ export default async function renderInbox(initialCode = '') {
       .filter((s) => mapping.get(s.title) !== SKIP)
       .reduce((n, s) => n + s.photos.length, 0) - alreadyHere);
 
-    // Captioning runs on the bot after /done, so a batch fetched straight away
-    // can still be part-written. Nothing blocks on it — the count is shown and
-    // importing anyway is a normal choice.
-    const pending = Number(manifest.pending || 0);
-
     body.appendChild(ui.group('Batch', [
-      ui.row({ title: manifest.project?.name || 'Unnamed', sub: `${total} photos · ${captioned} captioned` }),
+      ui.row({
+        title: manifest.project?.name || 'Unnamed',
+        sub: typed ? `${total} photos · ${typed} already captioned` : `${total} photos`,
+      }),
       ...(alreadyHere ? [ui.row({
         title: `${alreadyHere} already in this project`,
         sub: `Only the remaining ${total - alreadyHere} will be added`,
         iconName: 'check', iconColor: 'var(--sys-green)',
-      })] : []),
-      ...(pending ? [ui.row({
-        title: `${pending} caption${pending === 1 ? '' : 's'} still being written`,
-        sub: 'Tap to check again — or import now and caption in the app',
-        iconName: 'sparkle', iconColor: 'var(--sys-indigo)',
-        onclick: pull,
       })] : []),
       ui.row({
         title: 'Import into',

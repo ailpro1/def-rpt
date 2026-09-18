@@ -3,7 +3,6 @@
 
 import * as tg from './telegram.js';
 import * as batch from './batch.js';
-import { captionOnArrival } from './caption.js';
 
 const HELP = [
   'Insta Report intake',
@@ -100,14 +99,9 @@ async function filePhoto(env, msg, chatId) {
   if (!msg.photo && !asDocument) return;              // a PDF or a voice note is not a defect
 
   const big = asDocument ? null : tg.largest(msg.photo);
-  // Telegram ships several sizes. Keep the biggest for the report and note the
-  // one nearest a Gemini tile, so captioning never downloads more than it needs
-  // — a Worker cannot resize, but it can choose.
-  const small = asDocument ? null : tg.pickSize(msg.photo, Number(env.CAPTION_PX) || 768);
   const rec = await batch.addPhoto(env, meta, {
     id: msg.message_id,
     fileId: asDocument ? msg.document.file_id : big.file_id,
-    aiFileId: asDocument ? msg.document.file_id : (small || big).file_id,
     caption: (msg.caption || '').trim(),
     takenAt: sentAt(msg) * 1000,
     takenSource: asDocument ? 'file' : 'telegram',
@@ -116,29 +110,13 @@ async function filePhoto(env, msg, chatId) {
     mediaGroupId: msg.media_group_id || '',
   });
 
-  // Write it up now, in the same breath as filing it. Telegram delivers every
-  // photo as its own request, so this costs one Gemini call per request rather
-  // than a queue anywhere, and a few dozen photos are captioned by the time the
-  // last one is forwarded.
-  //
-  // Started here but returned rather than handed to ctx.waitUntil: this whole
-  // function ALREADY runs inside the webhook's waitUntil, after the response
-  // has gone back to Telegram, and a waitUntil called from there is not
-  // something the runtime promises to honour — it can be dropped on the floor
-  // without a word. Part of the returned promise, it cannot be. It runs
-  // alongside the ack rather than delaying it, and failing changes nothing:
-  // the photo is on the queue and the tick sweeps up the rest.
-  const captioning = captionOnArrival(env, meta.code, rec).catch(() => {});
-
   // Album items arrive as separate updates seconds apart; acking each one would
   // bury the chat, so only the first of a group speaks.
-  if (!rec.mediaGroupId || firstOfGroup(rec, msg)) {
-    const photos = await batch.listSummaries(env, meta.code);
-    const n = photos.filter((p) => p.section === rec.section).length;
-    await tg.sendMessage(env, chatId, `✓ ${rec.section} · ${n}`,
-      { disable_notification: true });
-  }
-  return captioning;
+  if (rec.mediaGroupId && !firstOfGroup(rec, msg)) return;
+  const photos = await batch.listSummaries(env, meta.code);
+  const n = photos.filter((p) => p.section === rec.section).length;
+  return tg.sendMessage(env, chatId, `✓ ${rec.section} · ${n}`,
+    { disable_notification: true });
 }
 
 /**
@@ -165,15 +143,13 @@ async function listBatch(env, chatId) {
   const photos = await batch.listSummaries(env, meta.code);
   if (!photos.length) return tg.sendMessage(env, chatId, `${meta.project.name} — no photos yet.`);
   const lines = batch.tally(photos).map(([sec, n]) => `${sec} — ${n}`);
-  // The code and the caption count, not just the tally. A batch has a code from
-  // the moment it opens, but only /done used to say it, so checking on a job in
-  // progress meant finishing it first. The caption count is the other thing
-  // worth knowing before importing: how much is still being written up.
-  const written = photos.filter((p) => p.caption).length;
+  // The code as well as the tally. A batch has a code from the moment it opens,
+  // but only /done used to say it, so checking on a job in progress meant
+  // finishing it first.
   return tg.sendMessage(env, chatId, [
     meta.project.name,
     ...lines,
-    `${photos.length} photo(s), ${written} captioned.`,
+    `${photos.length} photo(s) total.`,
     `Code: ${meta.code}${meta.status === 'open' ? ' (still open — /done when finished)' : ''}`,
   ].join('\n'));
 }

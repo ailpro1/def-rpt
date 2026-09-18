@@ -82,7 +82,7 @@ check('/list gives the code of an open batch', listReply.includes(code),
   listReply.replace(/\n/g, ' | '));
 check('/list says the batch is still open', /still open/.test(listReply),
   listReply.replace(/\n/g, ' | '));
-check('/list says how many are captioned', /captioned/.test(listReply),
+check('/list gives the total', /8 photo\(s\) total/.test(listReply),
   listReply.replace(/\n/g, ' | '));
 
 await feed(cmd('/undo'));

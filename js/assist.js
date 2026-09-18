@@ -7,8 +7,11 @@ import { BUILD } from './build.js';
 import { offlineCaption, offlineSummary } from './fallback.js';
 
 export const aiEnabled = BUILD.ai;
-export const DEFAULT_MODEL = 'gemini-2.5-flash';
-export const MODEL_CHOICES = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
+// One model, named here rather than chosen at runtime. The app used to discover
+// what a key could reach and step down a ladder when a model refused; all of
+// that existed to survive a free tier, and all of it could fail without saying
+// so. A paid key on a known model needs none of it.
+export const MODEL = 'claude-haiku-4-5';
 
 let pending = null;
 const ai = () => (pending || (pending = import('./ai.js')));
@@ -36,16 +39,6 @@ export async function draftSummary(project, sections) {
 export async function ask(question, context) {
   if (!BUILD.ai) throw new Error('The assistant is not part of this app.');
   return (await ai()).ask(question, context);
-}
-
-export async function listModels() {
-  if (!BUILD.ai) return [];
-  return (await ai()).listModels();
-}
-
-export async function modelFor(task = 'text') {
-  if (!BUILD.ai) return null;
-  return (await ai()).modelFor(task);
 }
 
 export async function openAssistant(project) {

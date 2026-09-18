@@ -13,7 +13,7 @@
 import worker from '../src/index.js';
 import { handleUpdate } from '../src/bot.js';
 import * as batch from '../src/batch.js';
-import { FakeKV, fakeTelegram, makeEnv, ctx, settle, cmd, photo, check, report } from './harness.js';
+import { FakeKV, fakeTelegram, makeEnv, ctx, cmd, photo, check, report } from './harness.js';
 
 const tgStub = fakeTelegram();
 globalThis.fetch = tgStub.fetchImpl;
@@ -84,84 +84,6 @@ check('claiming stays under the ceiling', claim.spent < CEILING, String(claim.sp
 check('a claimed code stops working immediately',
   (await req(`/api/batch/${code}`)).status === 404);
 
-/* ---------- captioning as photos arrive ---------- */
-/*
- * Captioning now happens inside the request that files the photo, which puts it
- * on the hot path and so under the rule at the top of this file: the sixtieth
- * photo must not cost more than the first. It is written to be constant —
- * cooldown, library, write — and this is what holds it to that.
- */
-
-const { captionPending } = await import('../src/caption.js');
-
-globalThis.DEFAULT_LIBRARY = [{ group: 'Tiling', items: ['HOLLOW TILE', 'UNFILLED GROUT'] }];
-const geminiStub = async (url, init) => {
-  if (String(url).includes('generativelanguage')) {
-    return new Response(JSON.stringify({
-      candidates: [{ content: { parts: [{ text: 'HOLLOW TILE' }] } }],
-    }), { status: 200 });
-  }
-  return tgStub.fetchImpl(url, init);
-};
-globalThis.fetch = geminiStub;
-
-const live = makeEnv(kv, { GEMINI_KEY: 'k' });
-const arrive = async () => { await handleUpdate(live, photo(), ctx); await settle(); };
-
-await handleUpdate(live, cmd('/project 5 JALAN CEMPAKA'), ctx);
-await handleUpdate(live, cmd('/sec BATH 1'), ctx);
-
-const firstArrival = await count('first arrival', arrive);
-for (let i = 1; i < 59; i++) await arrive();
-const lastArrival = await count('arrival 60', arrive);
-
-const live2 = await kv.get('chat:-100123');
-check('every arrival was captioned',
-  (await batch.listSummaries(live, live2)).every((p) => p.caption === 'HOLLOW TILE'));
-check('captioning the 60th arrival costs no more than the first',
-  lastArrival.spent <= firstArrival.spent + 1,
-  `first ${firstArrival.spent}, last ${lastArrival.spent}`);
-check('filing and captioning one photo stays under the ceiling',
-  lastArrival.spent < CEILING, String(lastArrival.spent));
-
-// Filing a photo puts its batch on the queue before anyone knows whether the
-// arrival pass will manage it. Nothing was left over here, so the first tick
-// should find that out and drop the batch — otherwise every tick after it pays
-// to look again, which is exactly the cost the queue exists to avoid.
-const swept = await count('sweep after arrivals', () => captionPending(live, 10));
-check('a tick after a complete arrival pass captions nothing',
-  (await captionPending(live, 10)).done === 0);
-check('and takes the finished batch off the queue',
-  !(await batch.queueList(live)).length, JSON.stringify(await batch.queueList(live)));
-check('the sweep stays under the ceiling', swept.spent < CEILING, String(swept.spent));
-
-/* ---------- what a day of doing nothing costs ---------- */
-/*
- * The captioning tick fires unattended, for ever. Cloudflare's free plan allows
- * 1000 key listings a day, and a tick that lists to ask "is there work?" spends
- * one every time — which blocked a real account over a weekend in which nobody
- * touched the bot. An idle tick must not list at all.
- */
-
-const LIST_BUDGET_PER_DAY = 1000;
-
-const idle = { reads: 0, lists: 0 };
-{
-  const before = { reads: kv.reads, lists: kv.lists };
-  const r = await captionPending({ ...env, GEMINI_KEY: 'k' }, 10);
-  idle.reads = kv.reads - before.reads;
-  idle.lists = kv.lists - before.lists;
-  check('an idle tick reports itself idle', r.idle === true, JSON.stringify(r));
-}
-check('an idle tick lists nothing at all', idle.lists === 0, `${idle.lists} listings`);
-check('an idle tick reads once', idle.reads <= 1, `${idle.reads} reads`);
-
-const everyTwoMinutes = (24 * 60) / 2;
-check('a day of idle ticks stays inside the free listing allowance',
-  idle.lists * everyTwoMinutes < LIST_BUDGET_PER_DAY,
-  `${idle.lists * everyTwoMinutes} a day against ${LIST_BUDGET_PER_DAY}`);
-
 report(`scale (${PHOTOS} photos)`);
 console.log('   cost in requests: '
-  + [first, last, mf, one, list, done, claim, firstArrival, lastArrival, swept]
-    .map((c) => `${c.label} ${c.spent}`).join(' · '));
+  + [first, last, mf, one, list, done, claim].map((c) => `${c.label} ${c.spent}`).join(' · '));

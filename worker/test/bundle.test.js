@@ -173,51 +173,34 @@ check('photo streams', photoRes.status === 200);
 check('photo is an image', photoRes.headers.get('content-type') === 'image/jpeg');
 
 /* ---------- the status route ---------- */
-/* Built after a live setup sat with five photos waiting and the captioner
-   reporting itself idle, with no way to see which of the two was lying. */
+/* Built after a live setup sat with photos waiting and no way to see what the
+   bot was actually holding. It outlived the captioner it was written for: what
+   it is really good for is answering which build is deployed and which batches
+   exist, without importing them to find out. */
 
 check('status needs the secret', (await req('/api/status?secret=wrong')).status === 401);
 
 const st = await (await req('/api/status?secret=shh')).json();
 check('status reports the build', st.build === healthBody.build, JSON.stringify(st.build));
-check('status says whether a key is set', st.geminiKeySet === false, JSON.stringify(st.geminiKeySet));
-check('status names the missing key as the reason',
-  /GEMINI_KEY is not set/.test(st.diagnosis), st.diagnosis);
-check('status lists the batch and what it is waiting on',
+check('status lists the batch and what is in it',
   st.batches.length === 1 && st.batches[0].code === code && st.batches[0].photos === 3,
   JSON.stringify(st.batches));
-// "Nothing waiting" once meant both "all done" and "all given up on". Three
-// separate counts, because those want opposite reactions.
-check('status splits captioned, blank and waiting',
-  st.batches[0].captioned === 2 && st.batches[0].blank === 0 && st.batches[0].waiting === 1,
-  JSON.stringify(st.batches[0]));
-check('status shows the captions themselves, so they can be eyeballed',
-  st.batches[0].sample.includes('OVERVIEW'), JSON.stringify(st.batches[0].sample));
+check('status counts the captions the site team typed',
+  st.batches[0].typedCaptions === 2, JSON.stringify(st.batches[0]));
+check('status says what to do with them', /Import them/.test(st.note), st.note);
 check('status carries no secret value',
   !JSON.stringify(st).includes('shh') && !JSON.stringify(st).includes('8123456789'),
   JSON.stringify(st));
 
-// The case that started this: photos waiting, but the queue does not know
-// about them, so the tick would never look. It has to say so rather than
-// reporting itself idle.
-await kv.delete('queue:pending');
-const stranded = await (await req('/api/status?secret=shh'))
-  .json()
-  .then((s) => s);
-const withKey = await worker.fetch(new Request(ORIGIN + '/api/status?secret=shh'),
-  { ...env, GEMINI_KEY: 'k' }, ctx).then((r) => r.json());
-check('a batch waiting off the queue is spotted',
-  /not on the queue/.test(withKey.diagnosis), withKey.diagnosis);
-check('and the fix is named', /rescan=1/.test(withKey.diagnosis), withKey.diagnosis);
-check('the queue is reported as it actually is',
-  Array.isArray(stranded.queue) && stranded.queue.length === 0, JSON.stringify(stranded.queue));
-
-// A rescan repairs the queue, so nobody has to run it a second time. It needs
-// a key to get as far as looking, which is the same order the real one runs in.
-await worker.fetch(new Request(ORIGIN + '/api/caption/run?secret=shh&rescan=1'),
-  { ...env, GEMINI_KEY: 'k' }, ctx);
-check('a rescan puts the stranded batch back on the queue',
-  (await kv.get('queue:pending') || '').includes(code), String(await kv.get('queue:pending')));
+// Everything the captioner added is gone, and stays gone: an AI key on this
+// Worker is a second setup to keep in step with the app's, which is exactly
+// what made the last one impossible to debug.
+for (const gone of ['/api/caption/run?secret=shh', '/api/library?secret=shh']) {
+  check(`${gone.split('?')[0]} no longer exists`,
+    (await req(gone, { method: 'POST' })).status === 404, gone);
+}
+check('no cron handler is exported', typeof worker.scheduled === 'undefined',
+  typeof worker.scheduled);
 
 check('claim works', (await req(`/api/batch/${code}/claim`, { method: 'POST' })).status === 200);
 check('claimed batch is gone', (await req(`/api/batch/${code}`)).status === 404);

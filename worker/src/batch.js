@@ -15,33 +15,6 @@ const CODE_LEN = 8;
 const TTL_DAYS = 14;
 export const TTL_SECONDS = TTL_DAYS * 86400;
 
-// Which batches still have photos waiting for a caption. The captioning tick
-// reads this one key and stops there when it is empty — listing keys to find
-// that out costs a list operation every minute of every day, which is how a
-// bot that nobody touched used up a month's free allowance in a weekend.
-const QUEUE_KEY = 'queue:pending';
-
-export async function queueList(env) {
-  const raw = await env.BATCHES.get(QUEUE_KEY);
-  try { return raw ? JSON.parse(raw) : []; } catch { return []; }
-}
-
-export async function queueAdd(env, code) {
-  const codes = await queueList(env);
-  if (codes.includes(code)) return codes;              // already queued: no write
-  const next = [...codes, code];
-  await env.BATCHES.put(QUEUE_KEY, JSON.stringify(next), { expirationTtl: TTL_SECONDS });
-  return next;
-}
-
-export async function queueRemove(env, code) {
-  const codes = await queueList(env);
-  if (!codes.includes(code)) return codes;
-  const next = codes.filter((c) => c !== code);
-  await env.BATCHES.put(QUEUE_KEY, JSON.stringify(next), { expirationTtl: TTL_SECONDS });
-  return next;
-}
-
 const metaKey = (code) => `batch:${code}:meta`;
 const photoKey = (code, id) => `batch:${code}:p:${String(id).padStart(12, '0')}`;
 const chatKey = (chatId) => `chat:${chatId}`;
@@ -97,17 +70,17 @@ export async function setSection(env, meta, title) {
  * lie about the order they were sent in.
  */
 /**
- * The fields anything other than captioning needs. KV can carry this alongside
- * the key, so a listing returns it without a read per photo — which is the
- * difference between a batch costing one request and costing one per photo.
+ * The fields a listing needs. KV can carry this alongside the key, so a listing
+ * returns it without a read per photo — which is the difference between a batch
+ * costing one request and costing one per photo.
  */
 export function summary(rec) {
   return {
     id: rec.id,
     section: rec.section,
-    caption: rec.aiCaption || rec.caption || '',
-    captionSource: rec.aiCaption ? 'ai' : (rec.caption ? 'typed' : ''),
-    tried: rec.aiCaption !== undefined || !!rec.caption,
+    // Whatever the site team typed on the photo in Telegram, and nothing else.
+    // Writing the captions is the app's job now.
+    caption: rec.caption || '',
     takenAt: rec.takenAt,
     takenSource: rec.takenSource,
     w: rec.w,
@@ -115,9 +88,8 @@ export function summary(rec) {
   };
 }
 
-/** Write a photo, keeping its summary on the key. Exported for the captioner,
- * which already holds the record and has no reason to read it back first. */
-export const putPhoto = (env, code, rec) =>
+/** Write a photo, keeping its summary on the key. */
+const putPhoto = (env, code, rec) =>
   env.BATCHES.put(photoKey(code, rec.id), JSON.stringify(rec), {
     expirationTtl: TTL_SECONDS,
     metadata: summary(rec),
@@ -127,7 +99,6 @@ export async function addPhoto(env, meta, photo) {
   const rec = {
     id: photo.id,
     fileId: photo.fileId,
-    aiFileId: photo.aiFileId || photo.fileId,
     section: meta.section || 'GENERAL',
     caption: photo.caption || '',
     takenAt: photo.takenAt,
@@ -135,12 +106,8 @@ export async function addPhoto(env, meta, photo) {
     w: photo.w || 0,
     h: photo.h || 0,
     mediaGroupId: photo.mediaGroupId || '',
-    // Filled in later by the captioning pass; absent means "not looked at yet".
-    aiCaption: undefined,
   };
   await putPhoto(env, meta.code, rec);
-  // Only a photo that needs a caption puts its batch in the queue.
-  if (!rec.caption) await queueAdd(env, meta.code);
   return rec;
 }
 
@@ -159,7 +126,7 @@ export async function listSummaries(env, code) {
     const page = await env.BATCHES.list({ prefix: `batch:${code}:p:`, cursor });
     for (const k of page.keys) {
       if (k.metadata) out.push(k.metadata);
-      else out.push({ id: Number(k.name.split(':').pop()), section: 'GENERAL', caption: '', tried: false });
+      else out.push({ id: Number(k.name.split(':').pop()), section: 'GENERAL', caption: '' });
     }
     cursor = page.list_complete ? null : page.cursor;
   } while (cursor);
@@ -211,7 +178,6 @@ export async function closeBatch(env, meta) {
  * swept up by KV itself instead of costing this request a read apiece.
  */
 export async function deleteBatch(env, meta, budget = 40) {
-  await queueRemove(env, meta.code);
   await env.BATCHES.delete(metaKey(meta.code));
   await env.BATCHES.delete(chatKey(meta.chatId));
   const summaries = await listSummaries(env, meta.code);
@@ -234,8 +200,7 @@ export function manifest(meta, photos) {
     bySection.get(title).push({
       n: i + 1,
       id: p.id,
-      caption: p.aiCaption || p.caption || '',
-      captionSource: p.aiCaption ? 'ai' : (p.caption ? 'typed' : ''),
+      caption: p.caption || '',
       takenAt: p.takenAt,
       takenSource: p.takenSource,
       w: p.w,
@@ -251,7 +216,6 @@ export function manifest(meta, photos) {
     createdAt: meta.createdAt,
     closedAt: meta.closedAt,
     total: photos.length,
-    pending: photos.filter((p) => (p.tried !== undefined ? !p.tried : (p.aiCaption === undefined && !p.caption))).length,
     sections: order.map((title) => ({ title, photos: bySection.get(title) })),
   };
 }
