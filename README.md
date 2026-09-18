@@ -50,10 +50,11 @@ searched on its own.
 - **Annotation** — circle, arrow, box, freehand, text, dot; six colours, three widths,
   undo/clear. Strokes are stored as normalised vectors, so a photo stays re-editable
   and re-renders at any size. A flattened JPEG is generated for the report and sharing.
-- **AI assistant** (optional, online) — Claude. Suggests a caption
-  from the photo, captions batches, drafts the executive summary from the recorded
-  items, and answers questions about the inspection. Picks the model itself and is
-  built to stay inside the free tier. Everything else works with no connection.
+- **AI assistant** (optional, online) — Claude Haiku 4.5, called straight from the
+  browser with your own API key. Suggests a caption from the photo, captions
+  batches, drafts the executive summary from the recorded items, and answers
+  questions about the inspection. About US$0.22 for a 200-photo inspection.
+  Everything else works with no connection.
 - **Report** — cover page (logo, title, property, metadata), executive summary with an
   item-count table, optional notes/limitations page, then paginated photo pages.
   2 / 4 / 6 / 8 photos per page. Print or Save as PDF via the OS print dialog.
