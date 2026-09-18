@@ -200,14 +200,19 @@ globalThis.fetch = plainStub;
 {
   const kv2 = new FakeKV();
   const live = makeEnv(kv2, { GEMINI_KEY: 'test-key', CAPTION_PX: '768' });
-  const send = (u) => handleUpdate(live, u, ctx);
+  // Deliberately NO ctx. The webhook calls handleUpdate from inside its own
+  // ctx.waitUntil, after the response has gone back to Telegram, and a
+  // waitUntil called from there can be dropped without a word — which is
+  // exactly how this shipped once and captioned nothing at all. Captioning has
+  // to be part of the promise handleUpdate returns, so passing no ctx must
+  // change nothing.
+  const send = (u) => handleUpdate(live, u, undefined);
 
   gemini.fail = null;
   gemini.reply = 'HOLLOW TILE';
   await send(cmd('/project 9 JALAN MERBAU'));
   await send(cmd('/sec BATH 1'));
   await send(photo());
-  await settle();
 
   const code2 = await kv2.get('chat:-100123');
   const arrived = (await batch.listSummaries(live, code2))[0];
@@ -232,7 +237,7 @@ globalThis.fetch = plainStub;
   // One at a time, because that is how they land: Telegram delivers each photo
   // as its own request, seconds apart, so what the first one learns is there for
   // the next.
-  for (let i = 0; i < 3; i++) { await send(photo()); await settle(); }
+  for (let i = 0; i < 3; i++) await send(photo());
 
   const pending = (await batch.listSummaries(live, code2)).filter((p) => !p.tried);
   check('a rate-limited burst is left for the tick, not written off',
@@ -254,7 +259,6 @@ globalThis.fetch = plainStub;
   await send(cmd('/sec YARD'));
   gemini.fail = { status: 403, message: 'API key not valid' };
   await send(photo());
-  await settle();
   const dud = (await batch.listSummaries(live, code2)).filter((p) => !p.tried);
   check('a permanent failure is written off, not retried for ever',
     dud.length === 0, `${dud.length} still pending`);

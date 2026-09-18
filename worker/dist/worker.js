@@ -693,7 +693,7 @@ async function handleUpdate(env, update, ctx) {
   const chatId = msg.chat && msg.chat.id;
   if (!allowed(env, chatId)) return;                  // silence, not an error page
 
-  if (msg.photo || msg.document) return filePhoto(env, msg, chatId, ctx);
+  if (msg.photo || msg.document) return filePhoto(env, msg, chatId);
 
   const [cmd, rest] = parseCommand(msg.text);
   if (!cmd) return;
@@ -753,7 +753,7 @@ async function chooseSection(env, chatId, title) {
  * time is the best capture time available and is marked as such. A photo sent as
  * a document keeps its original bytes — the import side reads EXIF out of those.
  */
-async function filePhoto(env, msg, chatId, ctx) {
+async function filePhoto(env, msg, chatId) {
   const meta = await batch.activeBatch(env, chatId);
   if (!meta) return;                                  // chatter before /project: ignore
 
@@ -780,19 +780,26 @@ async function filePhoto(env, msg, chatId, ctx) {
   // Write it up now, in the same breath as filing it. Telegram delivers every
   // photo as its own request, so this costs one Gemini call per request rather
   // than a queue anywhere, and a few dozen photos are captioned by the time the
-  // last one is forwarded. It runs after the reply is sent and can fail
-  // silently: the photo is on the queue, and the tick sweeps up the rest.
-  if (ctx && ctx.waitUntil) {
-    ctx.waitUntil(captionOnArrival(env, meta.code, rec).catch(() => {}));
-  }
+  // last one is forwarded.
+  //
+  // Started here but returned rather than handed to ctx.waitUntil: this whole
+  // function ALREADY runs inside the webhook's waitUntil, after the response
+  // has gone back to Telegram, and a waitUntil called from there is not
+  // something the runtime promises to honour — it can be dropped on the floor
+  // without a word. Part of the returned promise, it cannot be. It runs
+  // alongside the ack rather than delaying it, and failing changes nothing:
+  // the photo is on the queue and the tick sweeps up the rest.
+  const captioning = captionOnArrival(env, meta.code, rec).catch(() => {});
 
   // Album items arrive as separate updates seconds apart; acking each one would
   // bury the chat, so only the first of a group speaks.
-  if (rec.mediaGroupId && !firstOfGroup(rec, msg)) return;
-  const photos = await batch.listSummaries(env, meta.code);
-  const n = photos.filter((p) => p.section === rec.section).length;
-  return tg.sendMessage(env, chatId, `✓ ${rec.section} · ${n}`,
-    { disable_notification: true });
+  if (!rec.mediaGroupId || firstOfGroup(rec, msg)) {
+    const photos = await batch.listSummaries(env, meta.code);
+    const n = photos.filter((p) => p.section === rec.section).length;
+    await tg.sendMessage(env, chatId, `✓ ${rec.section} · ${n}`,
+      { disable_notification: true });
+  }
+  return captioning;
 }
 
 /**
