@@ -10,8 +10,18 @@ import { FakeKV, fakeTelegram, makeEnv, ctx, settle, cmd, photo, check, report }
 const tgStub = fakeTelegram();
 const gemini = { calls: [], reply: 'UNFILLED GROUT', fail: null };
 
+// What this key can see. Asked for by name before anything is captioned,
+// because hardcoding two model names is what broke a real setup.
+const OFFERED = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro'];
+const modelList = () => new Response(JSON.stringify({
+  models: OFFERED.map((n) => ({
+    name: `models/${n}`, supportedGenerationMethods: ['generateContent'],
+  })),
+}), { status: 200 });
+
 globalThis.fetch = async (url, init) => {
   const u = String(url);
+  if (u.includes('generativelanguage') && !u.includes(':generateContent')) return modelList();
   if (u.includes('generativelanguage')) {
     const body = JSON.parse(init.body);
     gemini.calls.push({ model: /models\/([^:]+):/.exec(u)[1], body });
@@ -107,8 +117,9 @@ await feed(photo());
 gemini.calls.length = 0;
 gemini.fail = { status: 429, message: 'Quota exceeded' };
 const limited = await captionPending(ai, 2);
-check('a rate limit tries the next model up',
-  gemini.calls.map((c) => c.model).join(',') === 'gemini-2.5-flash-lite,gemini-2.5-flash',
+check('a rate limit tries the next model up, and the one after that',
+  gemini.calls.map((c) => c.model).join(',')
+    === 'gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.5-pro',
   gemini.calls.map((c) => c.model).join(','));
 check('the photo is not left to jam the queue', limited.failed === 1, JSON.stringify(limited));
 check('a cooldown is remembered', !!(await kv.get('ai:cooldown')));
@@ -161,6 +172,7 @@ let refusedOnce = false;
 const plainStub = globalThis.fetch;
 globalThis.fetch = async (url, init) => {
   const u = String(url);
+  if (u.includes('generativelanguage') && !u.includes(':generateContent')) return modelList();
   if (u.includes('generativelanguage')) {
     const body = JSON.parse(init.body);
     gemini.calls.push({ model: /models\/([^:]+):/.exec(u)[1], body });
@@ -242,8 +254,10 @@ globalThis.fetch = plainStub;
   const pending = (await batch.listSummaries(live, code2)).filter((p) => !p.tried);
   check('a rate-limited burst is left for the tick, not written off',
     pending.length === 3, `${pending.length} of 3 still pending`);
-  check('the burst stops asking once a model is resting, rather than one refusal each',
-    gemini.calls.length === 2, `${gemini.calls.length} calls for 3 photos`);
+  // The first photo walks the whole ladder and puts every model to rest; the
+  // two behind it cost nothing at all.
+  check('the burst stops asking once every model is resting, rather than one refusal each',
+    gemini.calls.length === 3, `${gemini.calls.length} calls for 3 photos`);
   check('the batch is back on the queue for the tick',
     (await batch.queueList(live)).includes(code2));
 
@@ -263,6 +277,74 @@ globalThis.fetch = plainStub;
   check('a permanent failure is written off, not retried for ever',
     dud.length === 0, `${dud.length} still pending`);
   gemini.fail = null;
+}
+
+/* ---------- a key that cannot see the models we asked for ---------- */
+/*
+ * The live failure, exactly: a real key whose model list contains neither
+ * gemini-2.5-flash-lite nor gemini-2.5-flash. Both hardcoded names 404'd, both
+ * were marked as resting, and from then on every photo was skipped in silence —
+ * a resting model is not an error, so nothing was ever reported. The Worker has
+ * to ask the key what it has, the way the app already does.
+ */
+
+{
+  const kv5 = new FakeKV();
+  const odd = makeEnv(kv5, { GEMINI_KEY: 'test-key', CAPTION_PX: '768' });
+  // Names deliberately unlike the two we ask for, but flash-family.
+  const KEY_HAS = ['antigravity-preview-flash-lite', 'antigravity-preview-flash',
+    'text-embedding-004'];
+  const asked = [];
+
+  const before = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes('generativelanguage') && !u.includes(':generateContent')) {
+      return new Response(JSON.stringify({
+        models: KEY_HAS.map((n) => ({
+          name: `models/${n}`,
+          supportedGenerationMethods: ['generateContent'],
+        })),
+      }), { status: 200 });
+    }
+    if (u.includes('generativelanguage')) {
+      const model = /models\/([^:]+):/.exec(u)[1];
+      asked.push(model);
+      if (!KEY_HAS.includes(model)) {
+        return new Response(JSON.stringify({ error: { message: `models/${model} is not found` } }),
+          { status: 404 });
+      }
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'CHIPPED TILE' }] } }],
+      }), { status: 200 });
+    }
+    return tgStub.fetchImpl(url, init);
+  };
+
+  await handleUpdate(odd, cmd('/project ODD KEY'), undefined);
+  await handleUpdate(odd, cmd('/sec BATH 1'), undefined);
+  await handleUpdate(odd, photo(), undefined);
+
+  const code5 = await kv5.get('chat:-100123');
+  const got = (await batch.listSummaries(odd, code5))[0];
+  check('a key without the models we hardcoded still captions',
+    got && got.caption === 'CHIPPED TILE', JSON.stringify(got));
+  check('nothing outside the key\'s own list is ever called',
+    asked.every((m) => KEY_HAS.includes(m)), asked.join(','));
+  check('the embedding model is not offered a photo',
+    !asked.includes('text-embedding-004'), asked.join(','));
+  check('the cheapest match goes first',
+    asked[0] === 'antigravity-preview-flash-lite', asked.join(','));
+  check('nothing was left resting over a model the key never had',
+    !(await kv5.get('ai:cooldown')), String(await kv5.get('ai:cooldown')));
+
+  // Cached, so a tick every two minutes does not re-ask Google for a list that
+  // barely changes.
+  check('the model list is remembered rather than re-asked',
+    JSON.parse(await kv5.get('ai:models') || '[]').join(',') === KEY_HAS.slice().sort().join(','),
+    String(await kv5.get('ai:models')));
+
+  globalThis.fetch = before;
 }
 
 /* ---------- a run says which list it looked at ---------- */

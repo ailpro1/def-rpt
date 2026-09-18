@@ -6,7 +6,7 @@
 // payment method on the account — see worker/README.md.
 
 import { handleUpdate } from './bot.js';
-import { captionPending } from './caption.js';
+import { captionPending, ladderFor } from './caption.js';
 import * as tg from './telegram.js';
 import * as batch from './batch.js';
 
@@ -82,6 +82,13 @@ export default {
       if (path === '/api/caption/run') {
         if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
           return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
+        }
+        // ?reset=1 forgets which models are resting and which the key has, for
+        // after replacing a key or fixing one. Both come back on their own
+        // within minutes; this is for not waiting.
+        if (url.searchParams.get('reset') === '1') {
+          await env.BATCHES.delete('ai:cooldown');
+          await env.BATCHES.delete('ai:models');
         }
         // ?rescan=1 finds work by scanning every key, for when the queue has
         // been lost. It costs list operations, so it is never automatic.
@@ -159,7 +166,15 @@ async function status(env) {
 
   const stranded = batches.filter((b) => b.waiting > 0 && !b.queued);
   const cooldown = await env.BATCHES.get('ai:cooldown');
+  const cooling = cooldown ? JSON.parse(cooldown) : {};
 
+  // What the key can actually call, which is the one thing nothing else here
+  // could see: two hardcoded names that a key cannot reach look exactly like a
+  // model resting, and a resting model is not an error anyone can read.
+  let models = { ladder: [], available: [], error: 'no key' };
+  if (env.GEMINI_KEY) models = await ladderFor(env).catch((err) => ({ ladder: [], available: [], error: err.message }));
+
+  const now = Date.now();
   return {
     ok: true,
     build: buildStamp(),
@@ -167,25 +182,38 @@ async function status(env) {
     perTick: Number(env.CAPTION_PER_TICK) || 6,
     queue,
     batches,
-    cooling: cooldown ? JSON.parse(cooldown) : {},
-    diagnosis: diagnose(env, batches, stranded),
+    modelsTried: models.ladder,
+    modelsAvailable: models.available,
+    modelListError: models.error || undefined,
+    cooling: Object.fromEntries(Object.entries(cooling)
+      .map(([m, until]) => [m, until > now ? `resting ${Math.ceil((until - now) / 1000)}s` : 'ready'])),
+    diagnosis: diagnose(env, batches, stranded, models),
   };
 }
 
-function diagnose(env, batches, stranded) {
+function diagnose(env, batches, stranded, models) {
   if (!env.GEMINI_KEY) {
     return 'GEMINI_KEY is not set on this Worker, so nothing will ever be captioned. '
       + 'Settings > Variables and Secrets > add it as a Secret, then Deploy.';
   }
+  if (models.error && !models.available.length) {
+    return `Google would not say which models this key has: ${models.error} `
+      + 'Usually the key is wrong, or it is from a project without the Generative Language API on.';
+  }
+  if (!models.ladder.length) {
+    return 'This key has no model that can caption an image. Make a new key at '
+      + 'aistudio.google.com and replace GEMINI_KEY.';
+  }
   const waiting = batches.reduce((n, b) => n + b.waiting, 0);
-  if (!waiting) return 'Nothing is waiting for a caption.';
+  if (!waiting) return `Nothing is waiting for a caption. Captioning would use ${models.ladder[0]}.`;
   if (stranded.length) {
     return `${waiting} photo(s) are waiting but ${stranded.length} batch(es) are not on the `
       + 'queue, so the tick will never look at them. This happens to photos filed before the '
       + 'queue existed. Run /api/caption/run?secret=...&rescan=1 once to pick them up.';
   }
-  return `${waiting} photo(s) are waiting and queued. If they stay that way, the cron trigger `
-    + 'is not firing: check Settings > Trigger Events for */2 * * * *.';
+  return `${waiting} photo(s) are waiting and queued, and this key can reach `
+    + `${models.ladder.join(', ')}. If they stay waiting, the cron trigger is not firing: `
+    + 'check Settings > Trigger Events for */2 * * * *.';
 }
 
 /**

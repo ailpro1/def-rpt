@@ -128,6 +128,13 @@ and the batch stays on `queue:pending`, and the tick clears six at a time until
 the list is empty. Around 180 an hour, which finishes a 200-photo day inside the
 hour.
 
+**Which model.** Not a hardcoded name. The Worker asks Google what the key can
+actually call, caches that for six hours, and resolves the two it wants —
+cheapest flash first — against that list, extending with whatever else the key
+has up to three. Two hardcoded names once failed on a real key that had neither:
+both 404'd, both were marked as resting, and from then on every photo was
+skipped in silence, because a resting model is not an error anyone can read.
+
 The distinction that makes this work is between a failure that will clear and
 one that will not. A rate limit or a resting model leaves the photo pending; a
 403, an unreadable file or an empty answer marks it tried, so one bad photo
@@ -147,7 +154,7 @@ instead of reading a queue once had a real account blocked over a weekend.
 | `GET /health` | liveness, and which build is deployed |
 | `GET /tg/register?secret=…` | one-time: points Telegram at this Worker |
 | `GET /api/status?secret=…` | why captioning is or is not happening |
-| `GET /api/caption/run?secret=…` | caption now; `&rescan=1` also repairs the queue |
+| `GET /api/caption/run?secret=…` | caption now; `&rescan=1` also repairs the queue, `&reset=1` forgets the cached model list and any cooldown |
 
 `/health` reports the build stamp that `worker/build.mjs` prints — the paste is
 the one step with no receipt, and an old file still running looks exactly like a

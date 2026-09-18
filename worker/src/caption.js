@@ -27,10 +27,13 @@ import * as tg from './telegram.js';
 import * as batch from './batch.js';
 
 const HOST = 'https://generativelanguage.googleapis.com/v1beta/models';
-const LADDER = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+const WANTED = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
 const COOLDOWN_MS = 90_000;
 const HINTS = 24;                 // library entries shown to the model
 const COOLDOWN_KEY = 'ai:cooldown';
+const MODELS_KEY = 'ai:models';
+const MODELS_TTL = 21_600;        // 6 hours; a key's model list barely moves
+const LADDER_MAX = 3;             // models tried per photo, before the budget bites
 
 const SYSTEM =
   'Caption photos for a building defect report. Reply with the caption only. '
@@ -93,6 +96,105 @@ function libraryHint(lib, sectionTitle) {
     ...flat.filter((c) => !suited.has(c.group)),
   ];
   return ranked.slice(0, HINTS).map((c) => c.text.replace(/\n/g, ' / ')).join(' | ');
+}
+
+/* ------------------------- which models this key has ------------------------- */
+
+/*
+ * Two model names were hardcoded here, and a real key could not see either of
+ * them. Both were marked as resting on the first try and nothing was ever
+ * captioned — with no error to look at, because a resting model is not a
+ * failure. The app already learned this lesson and asks Google what the key
+ * actually has; this is the same thing, ported, with the answer cached in KV so
+ * a tick every two minutes does not ask afresh every time.
+ */
+
+const USABLE = (m) => !/embedding|aqa|imagen|image-generation|tts|native-audio|live/.test(m);
+
+/** Every model this key can call generateContent on. */
+export async function listModels(env, { refresh = false } = {}) {
+  if (!refresh) {
+    const raw = await env.BATCHES.get(MODELS_KEY);
+    if (raw) {
+      try {
+        const cached = JSON.parse(raw);
+        if (Array.isArray(cached) && cached.length) return cached;
+      } catch { /* fall through and ask again */ }
+    }
+  }
+
+  const found = [];
+  let url = `${HOST}?pageSize=200`;
+  for (let page = 0; page < 4 && url; page++) {
+    const res = await fetch(url, { headers: { 'x-goog-api-key': env.GEMINI_KEY } });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json()).error?.message || ''; } catch { /* non-JSON */ }
+      throw new Error(`Google refused the model list (${res.status}). ${detail}`.trim());
+    }
+    const data = await res.json();
+    for (const m of data.models || []) {
+      if ((m.supportedGenerationMethods || []).includes('generateContent')) {
+        found.push(String(m.name || '').replace(/^models\//, ''));
+      }
+    }
+    url = data.nextPageToken
+      ? `${HOST}?pageSize=200&pageToken=${encodeURIComponent(data.nextPageToken)}` : null;
+  }
+  found.sort();
+  if (found.length) {
+    await env.BATCHES.put(MODELS_KEY, JSON.stringify(found), { expirationTtl: MODELS_TTL });
+  }
+  return found;
+}
+
+/**
+ * The closest model this key really has to the one we wanted.
+ *
+ * The rule that matters, same as in the app: when the key's list is known,
+ * never hand back a name that is not on it. Returning the name we wished for is
+ * how this failed — a 404 quoting a model nobody chose.
+ */
+export function resolve(wanted, available) {
+  const list = (available || []).filter(USABLE);
+  if (!list.length) return wanted;
+  if (list.includes(wanted)) return wanted;
+
+  const family = /lite/.test(wanted) ? 'lite' : /pro/.test(wanted) ? 'pro' : 'flash';
+  const pick = (test) => list.find(test);
+  const chosen = family === 'lite'
+    ? pick((m) => /flash/.test(m) && /lite/.test(m)) || pick((m) => /flash/.test(m))
+    : family === 'pro'
+      ? pick((m) => /pro/.test(m) && !/vision/.test(m)) || pick((m) => /flash/.test(m))
+      : pick((m) => /flash/.test(m) && !/lite/.test(m)) || pick((m) => /flash/.test(m));
+
+  return chosen || pick((m) => /gemini/.test(m)) || list[0];
+}
+
+/** What to try, in order, for this key. Cheapest first, then whatever else it has. */
+export async function ladderFor(env) {
+  let available = [];
+  let error = '';
+  try {
+    available = await listModels(env);
+  } catch (err) {
+    // No list is not fatal: the names we know are still worth a try, and a key
+    // that cannot list may still generate.
+    error = err.message;
+  }
+  if (!available.length) return { ladder: WANTED.slice(), available, error };
+
+  const ladder = [];
+  for (const wanted of WANTED) {
+    const got = resolve(wanted, available);
+    if (got && !ladder.includes(got)) ladder.push(got);
+  }
+  // A key whose models are all named something unfamiliar still has models.
+  for (const m of available.filter(USABLE)) {
+    if (ladder.length >= LADDER_MAX) break;
+    if (!ladder.includes(m)) ladder.push(m);
+  }
+  return { ladder: ladder.slice(0, LADDER_MAX), available, error };
 }
 
 /* ------------------------- talking to Gemini ------------------------- */
@@ -195,7 +297,9 @@ export async function captionPending(env, max = 6, { rescan = false } = {}) {
 
   const lib = await library(env);
   const cool = await cooling(env);
-  const out = { ok: true, ...looked, done: 0, failed: 0, remaining: 0, errors: [] };
+  const { ladder, error: ladderError } = await ladderFor(env);
+  const out = { ok: true, ...looked, models: ladder, done: 0, failed: 0, remaining: 0, errors: [] };
+  if (ladderError) out.errors.push(ladderError);
 
   for (const code of codes) {
     // Summaries first, so finding the handful still to do costs one request
@@ -217,7 +321,7 @@ export async function captionPending(env, max = 6, { rescan = false } = {}) {
       try {
         const photo = await batch.getPhoto(env, code, s.id);
         if (!photo) continue;
-        await captionOne(env, code, photo, lib, cool);
+        await captionOne(env, code, photo, lib, cool, ladder);
         out.done++;
       } catch (err) {
         out.failed++;
@@ -233,7 +337,7 @@ export async function captionPending(env, max = 6, { rescan = false } = {}) {
   return out;
 }
 
-async function captionOne(env, code, photo, lib, cool) {
+async function captionOne(env, code, photo, lib, cool, ladder) {
   // The variant nearest a Gemini tile, chosen when the photo arrived. Older
   // batches only have the full-size one.
   const file = await tg.openFile(env, photo.aiFileId || photo.fileId);
@@ -242,7 +346,7 @@ async function captionOne(env, code, photo, lib, cool) {
   const img = base64(bytes);
 
   let last = null;
-  for (const model of LADDER) {
+  for (const model of ladder) {
     if (!cool.ready(model)) continue;
     for (const plain of [false, true]) {
       try {
@@ -283,16 +387,17 @@ export async function captionOnArrival(env, code, rec) {
   if (!env.GEMINI_KEY || !rec || rec.caption) return null;
 
   const cool = await cooling(env);
+  const { ladder } = await ladderFor(env);
   // Gemini said "too fast" a moment ago and the rest of the burst is still
   // coming. Stop before reading the library or downloading anything: every
   // photo behind this one would otherwise pay for the same refusal.
-  if (!LADDER.some((m) => cool.ready(m))) return null;
+  if (!ladder.some((m) => cool.ready(m))) return null;
 
   // Outside the try on purpose: only a failure to caption should write the photo
   // off, never a storage hiccup reading the library.
   const lib = await library(env);
   try {
-    return await captionOne(env, code, rec, lib, cool);
+    return await captionOne(env, code, rec, lib, cool, ladder);
   } catch (err) {
     if (!err.retry) await batch.updatePhoto(env, code, rec.id, { aiCaption: '' });
     return null;
