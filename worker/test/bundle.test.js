@@ -186,6 +186,13 @@ check('status names the missing key as the reason',
 check('status lists the batch and what it is waiting on',
   st.batches.length === 1 && st.batches[0].code === code && st.batches[0].photos === 3,
   JSON.stringify(st.batches));
+// "Nothing waiting" once meant both "all done" and "all given up on". Three
+// separate counts, because those want opposite reactions.
+check('status splits captioned, blank and waiting',
+  st.batches[0].captioned === 2 && st.batches[0].blank === 0 && st.batches[0].waiting === 1,
+  JSON.stringify(st.batches[0]));
+check('status shows the captions themselves, so they can be eyeballed',
+  st.batches[0].sample.includes('OVERVIEW'), JSON.stringify(st.batches[0].sample));
 check('status carries no secret value',
   !JSON.stringify(st).includes('shh') && !JSON.stringify(st).includes('8123456789'),
   JSON.stringify(st));

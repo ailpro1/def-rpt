@@ -4,7 +4,7 @@
 
 // Which build this is. /health reports it back, so "is my paste live?" is
 // one look rather than an afternoon.
-const BUILD_STAMP = '0e7e20c0';
+const BUILD_STAMP = '3dc3270a';
 
 /* ---------- caption library, from js/captions.js ---------- */
 
@@ -1165,8 +1165,13 @@ async function status(env) {
       project: meta && meta.project ? meta.project.name : '',
       status: meta ? meta.status : 'missing',
       photos: photos.length,
+      // Split three ways, because "nothing waiting" meant both "all done" and
+      // "all given up on", and those want opposite reactions.
+      captioned: photos.filter((p) => p.caption).length,
+      blank: photos.filter((p) => p.tried && !p.caption).length,
       waiting: photos.filter((p) => !p.tried).length,
       queued: queue.includes(code),
+      sample: photos.filter((p) => p.caption).slice(0, 3).map((p) => p.caption),
     });
   }
 
@@ -1211,7 +1216,16 @@ function diagnose(env, batches, stranded, models) {
       + 'aistudio.google.com and replace GEMINI_KEY.';
   }
   const waiting = batches.reduce((n, b) => n + b.waiting, 0);
-  if (!waiting) return `Nothing is waiting for a caption. Captioning would use ${models.ladder[0]}.`;
+  const blank = batches.reduce((n, b) => n + b.blank, 0);
+  const captioned = batches.reduce((n, b) => n + b.captioned, 0);
+  if (!waiting) {
+    if (blank && !captioned) {
+      return `Nothing is waiting, but all ${blank} photo(s) were given up on rather than `
+        + `captioned. Run /api/caption/run?secret=...&reset=1 and read the errors it reports.`;
+    }
+    return `Nothing is waiting: ${captioned} photo(s) captioned`
+      + `${blank ? `, ${blank} given up on` : ''}. Captioning uses ${models.ladder[0]}.`;
+  }
   if (stranded.length) {
     return `${waiting} photo(s) are waiting but ${stranded.length} batch(es) are not on the `
       + 'queue, so the tick will never look at them. This happens to photos filed before the '
