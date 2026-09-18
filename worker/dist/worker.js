@@ -4,7 +4,7 @@
 
 // Which build this is. /health reports it back, so "is my paste live?" is
 // one look rather than an afternoon.
-const BUILD_STAMP = '3705bfef';
+const BUILD_STAMP = '88e0474a';
 
 /* ---------- caption library, from js/captions.js ---------- */
 
@@ -543,11 +543,18 @@ async function captionPending(env, max = 6, { rescan = false } = {}) {
   // forever, so an idle tick has to cost as close to nothing as possible — in
   // particular it must not list keys, which is the scarcest free allowance.
   const codes = rescan ? await openCodes(env) : await batch.queueList(env);
-  if (!codes.length) return { ok: true, done: 0, failed: 0, remaining: 0, idle: true, errors: [] };
+  // Say which list this looked at and what was on it. Without that, a rescan
+  // that found nothing and a tick that found nothing read identically, and
+  // there was no way to tell a repaired queue from a request whose &rescan=1
+  // never arrived.
+  const looked = { scanned: rescan ? 'every batch' : 'the queue', found: codes.length };
+  if (!codes.length) {
+    return { ok: true, ...looked, done: 0, failed: 0, remaining: 0, idle: true, errors: [] };
+  }
 
   const lib = await library(env);
   const cool = await cooling(env);
-  const out = { ok: true, done: 0, failed: 0, remaining: 0, errors: [] };
+  const out = { ok: true, ...looked, done: 0, failed: 0, remaining: 0, errors: [] };
 
   for (const code of codes) {
     // Summaries first, so finding the handful still to do costs one request

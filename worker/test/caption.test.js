@@ -265,6 +265,23 @@ globalThis.fetch = plainStub;
   gemini.fail = null;
 }
 
+/* ---------- a run says which list it looked at ---------- */
+/* A rescan that finds nothing and a tick that finds nothing used to read
+   identically, so there was no way to tell a genuinely empty account from a
+   request whose &rescan=1 never arrived. */
+
+{
+  const kv4 = new FakeKV();
+  const empty = makeEnv(kv4, { GEMINI_KEY: 'test-key' });
+  const viaQueue = await captionPending(empty, 6);
+  const viaScan = await captionPending(empty, 6, { rescan: true });
+  check('a tick says it read the queue',
+    viaQueue.scanned === 'the queue' && viaQueue.found === 0, JSON.stringify(viaQueue));
+  check('a rescan says it read every batch',
+    viaScan.scanned === 'every batch' && viaScan.found === 0, JSON.stringify(viaScan));
+  check('the two are told apart', viaQueue.scanned !== viaScan.scanned);
+}
+
 /* ---------- no key: the bot still collects ---------- */
 
 {
