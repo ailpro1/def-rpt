@@ -144,8 +144,20 @@ instead of reading a queue once had a real account blocked over a weekend.
 | `GET /api/batch/:code` | the manifest: sections, captions, photo ids |
 | `GET /api/photo/:code/:id` | that photo's bytes, streamed from Telegram |
 | `POST /api/batch/:code/claim` | app has them; drop the batch |
-| `GET /health` | liveness |
+| `GET /health` | liveness, and which build is deployed |
 | `GET /tg/register?secret=…` | one-time: points Telegram at this Worker |
+| `GET /api/status?secret=…` | why captioning is or is not happening |
+| `GET /api/caption/run?secret=…` | caption now; `&rescan=1` also repairs the queue |
+
+`/health` reports the build stamp that `worker/build.mjs` prints — the paste is
+the one step with no receipt, and an old file still running looks exactly like a
+new one. Compare the two before debugging anything else.
+
+`/api/status` answers the question the captioner cannot: it lists every batch,
+how many photos each is still waiting on, whether the queue agrees, and whether
+a key is set, then names which of those is the problem. It carries codes and
+counts, never a credential. It lists keys, so it is behind the secret and never
+runs on its own.
 
 ## Tests
 

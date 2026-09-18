@@ -200,6 +200,10 @@ export async function captionPending(env, max = 6, { rescan = false } = {}) {
       await batch.queueRemove(env, code);
       continue;
     }
+    // A rescan is what you run when the queue has lost something — photos filed
+    // before the queue existed, or a write that did not land. Put it back, so
+    // the fix is permanent and nobody has to run this twice.
+    if (rescan) await batch.queueAdd(env, code);
 
     for (const s of waiting) {
       if (out.done + out.failed >= max) { out.remaining++; continue; }

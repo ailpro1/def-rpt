@@ -40,7 +40,20 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors() });
 
     try {
-      if (path === '/health') return json({ ok: true });
+      // `build` is a fingerprint of the pasted file, printed by worker/build.mjs.
+      // "Did my paste actually land?" has cost more time here than any bug, and
+      // this answers it in one look.
+      if (path === '/health') return json({ ok: true, build: buildStamp() });
+
+      // Everything the captioner looks at, in one place. Nothing here is a
+      // secret — codes, counts and whether a key is set, never its value — but
+      // it lists keys, so it is behind the webhook secret and never automatic.
+      if (path === '/api/status') {
+        if (url.searchParams.get('secret') !== env.TG_WEBHOOK_SECRET) {
+          return json({ ok: false, error: 'That secret does not match TG_WEBHOOK_SECRET.' }, 401);
+        }
+        return json(await status(env));
+      }
 
       if (path === '/tg/webhook' && request.method === 'POST') {
         // Telegram is the only caller that knows this header. Anything else is
@@ -104,6 +117,76 @@ export default {
     }
   },
 };
+
+/** The bundle's fingerprint, or 'dev' when running from src/ under Node. */
+const buildStamp = () => (typeof BUILD_STAMP === 'string' ? BUILD_STAMP : 'dev');
+
+/**
+ * Why captioning is or is not happening, answered from the stored state rather
+ * than from what anyone believes is deployed.
+ *
+ * Every mystery so far has come down to one of these four: the wrong file is
+ * pasted, the key is missing, the queue disagrees with what is actually
+ * waiting, or a batch is not there at all. So: report all four together, and
+ * say plainly which it is.
+ */
+async function status(env) {
+  const queue = await batch.queueList(env);
+  const codes = [];
+  let cursor;
+  do {
+    const page = await env.BATCHES.list({ prefix: 'batch:', cursor });
+    for (const k of page.keys) {
+      const m = /^batch:([A-Z0-9]+):meta$/.exec(k.name);
+      if (m) codes.push(m[1]);
+    }
+    cursor = page.list_complete ? null : page.cursor;
+  } while (cursor);
+
+  const batches = [];
+  for (const code of codes.slice(0, 20)) {
+    const meta = await batch.getMeta(env, code);
+    const photos = await batch.listSummaries(env, code);
+    batches.push({
+      code,
+      project: meta && meta.project ? meta.project.name : '',
+      status: meta ? meta.status : 'missing',
+      photos: photos.length,
+      waiting: photos.filter((p) => !p.tried).length,
+      queued: queue.includes(code),
+    });
+  }
+
+  const stranded = batches.filter((b) => b.waiting > 0 && !b.queued);
+  const cooldown = await env.BATCHES.get('ai:cooldown');
+
+  return {
+    ok: true,
+    build: buildStamp(),
+    geminiKeySet: !!env.GEMINI_KEY,
+    perTick: Number(env.CAPTION_PER_TICK) || 6,
+    queue,
+    batches,
+    cooling: cooldown ? JSON.parse(cooldown) : {},
+    diagnosis: diagnose(env, batches, stranded),
+  };
+}
+
+function diagnose(env, batches, stranded) {
+  if (!env.GEMINI_KEY) {
+    return 'GEMINI_KEY is not set on this Worker, so nothing will ever be captioned. '
+      + 'Settings > Variables and Secrets > add it as a Secret, then Deploy.';
+  }
+  const waiting = batches.reduce((n, b) => n + b.waiting, 0);
+  if (!waiting) return 'Nothing is waiting for a caption.';
+  if (stranded.length) {
+    return `${waiting} photo(s) are waiting but ${stranded.length} batch(es) are not on the `
+      + 'queue, so the tick will never look at them. This happens to photos filed before the '
+      + 'queue existed. Run /api/caption/run?secret=...&rescan=1 once to pick them up.';
+  }
+  return `${waiting} photo(s) are waiting and queued. If they stay that way, the cron trigger `
+    + 'is not firing: check Settings > Trigger Events for */2 * * * *.';
+}
 
 /**
  * Point Telegram at this Worker. This is the one step done by hand during

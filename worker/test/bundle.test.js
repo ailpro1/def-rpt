@@ -35,7 +35,13 @@ const deliver = async (update) => {
   return res;
 };
 
-check('health answers', (await req('/health')).status === 200);
+const health = await req('/health');
+check('health answers', health.status === 200);
+// Which file is actually deployed has been the hidden cause of more than one
+// bug here, so the built file says who it is and /health hands that back.
+const healthBody = await health.json();
+check('health reports which build is running',
+  /^[0-9a-f]{8}$/.test(healthBody.build || ''), JSON.stringify(healthBody));
 
 /* ---------- setup, the way SETUP.md describes it ---------- */
 
@@ -165,6 +171,46 @@ check('captions carried', manifest.sections[0].photos[0].caption === 'OVERVIEW')
 const photoRes = await req(`/api/photo/${code}/${manifest.sections[0].photos[0].id}`);
 check('photo streams', photoRes.status === 200);
 check('photo is an image', photoRes.headers.get('content-type') === 'image/jpeg');
+
+/* ---------- the status route ---------- */
+/* Built after a live setup sat with five photos waiting and the captioner
+   reporting itself idle, with no way to see which of the two was lying. */
+
+check('status needs the secret', (await req('/api/status?secret=wrong')).status === 401);
+
+const st = await (await req('/api/status?secret=shh')).json();
+check('status reports the build', st.build === healthBody.build, JSON.stringify(st.build));
+check('status says whether a key is set', st.geminiKeySet === false, JSON.stringify(st.geminiKeySet));
+check('status names the missing key as the reason',
+  /GEMINI_KEY is not set/.test(st.diagnosis), st.diagnosis);
+check('status lists the batch and what it is waiting on',
+  st.batches.length === 1 && st.batches[0].code === code && st.batches[0].photos === 3,
+  JSON.stringify(st.batches));
+check('status carries no secret value',
+  !JSON.stringify(st).includes('shh') && !JSON.stringify(st).includes('8123456789'),
+  JSON.stringify(st));
+
+// The case that started this: photos waiting, but the queue does not know
+// about them, so the tick would never look. It has to say so rather than
+// reporting itself idle.
+await kv.delete('queue:pending');
+const stranded = await (await req('/api/status?secret=shh'))
+  .json()
+  .then((s) => s);
+const withKey = await worker.fetch(new Request(ORIGIN + '/api/status?secret=shh'),
+  { ...env, GEMINI_KEY: 'k' }, ctx).then((r) => r.json());
+check('a batch waiting off the queue is spotted',
+  /not on the queue/.test(withKey.diagnosis), withKey.diagnosis);
+check('and the fix is named', /rescan=1/.test(withKey.diagnosis), withKey.diagnosis);
+check('the queue is reported as it actually is',
+  Array.isArray(stranded.queue) && stranded.queue.length === 0, JSON.stringify(stranded.queue));
+
+// A rescan repairs the queue, so nobody has to run it a second time. It needs
+// a key to get as far as looking, which is the same order the real one runs in.
+await worker.fetch(new Request(ORIGIN + '/api/caption/run?secret=shh&rescan=1'),
+  { ...env, GEMINI_KEY: 'k' }, ctx);
+check('a rescan puts the stranded batch back on the queue',
+  (await kv.get('queue:pending') || '').includes(code), String(await kv.get('queue:pending')));
 
 check('claim works', (await req(`/api/batch/${code}/claim`, { method: 'POST' })).status === 200);
 check('claimed batch is gone', (await req(`/api/batch/${code}`)).status === 404);
