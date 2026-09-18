@@ -8,6 +8,7 @@
 import { cp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { fingerprint } from './fingerprint.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const DIST = join(ROOT, 'dist');
@@ -54,8 +55,9 @@ async function edit(path, fn) {
   await writeFile(path, fn(await readFile(path, 'utf8')));
 }
 
-// The version lives in sw.js, which is what actually changes on a release. The
+// The readable version lives in sw.js, which is what changes on a release. The
 // app reads it so "which version am I running?" has an answer on the screen.
+// It is not what invalidates the cache — see tools/fingerprint.mjs for that.
 const swSource = await readFile(join(ROOT, 'sw.js'), 'utf8');
 const VERSION = (/const VERSION = '([^']+)'/.exec(swSource) || [, 'dev'])[1];
 
@@ -86,10 +88,12 @@ async function variant(v) {
     return JSON.stringify(m, null, 2) + '\n';
   });
 
+  // Last, so it can fingerprint the finished output.
+  const stamp = await fingerprint(out);
   await edit(join(out, 'sw.js'), (s) => {
     let next = s.replace(
       "const CACHE = (self.APP_CACHE_PREFIX || 'instareport-admin-') + VERSION;",
-      `const CACHE = 'instareport-${v.dir}-' + VERSION;`);
+      `const CACHE = 'instareport-${v.dir}-' + VERSION + '-${stamp}';`);
     // Never precache a file this variant does not ship.
     for (const dead of v.drop) {
       next = next.replace(new RegExp(`^\\s*'\\./${dead.replace(/[/.]/g, '\\$&')}',\\n`, 'm'), '');
@@ -97,7 +101,7 @@ async function variant(v) {
     return next;
   });
 
-  return `${v.dir}: ${v.build.name} (ai=${v.build.ai}, db=${v.build.dbName})`;
+  return `${v.dir}: ${v.build.name} (ai=${v.build.ai}, db=${v.build.dbName}, cache ${stamp})`;
 }
 
 const CHOOSER = `<!doctype html>

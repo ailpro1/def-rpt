@@ -77,6 +77,21 @@ cd dist && python3 -m http.server 8080
 # open http://localhost:8080
 ```
 
+### Tests
+
+```bash
+node tools/build.mjs
+node test/build-cache.mjs      # the service worker cannot serve a mixed build
+python3 test/ai-claude.py      # what the assistant sends, and how it fails
+python3 worker/test/e2e.py     # Telegram batch -> project, in headless Chromium
+```
+
+`build-cache.mjs` exists because the cache name was once a hand-edited constant.
+Forget to bump it and the browser keeps the shell it already has, so half the old
+app runs against half the new one — it surfaces as an import of a name that no
+longer exists. The name now carries a fingerprint of everything shipped, and that
+test holds it there.
+
 To work on the source directly (single app, full features):
 
 ```bash
