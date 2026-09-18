@@ -10,7 +10,7 @@ const HELP = [
   '',
   '/project 23 JALAN KERUING — start a new batch',
   '/sec KITCHEN — file the photos that follow under this section',
-  '/list — what is in the batch so far',
+  '/list — what is in the batch so far, and its code',
   '/undo — remove the last photo',
   '/done — finish and get the import code',
   '/cancel — throw the batch away',
@@ -165,8 +165,17 @@ async function listBatch(env, chatId) {
   const photos = await batch.listSummaries(env, meta.code);
   if (!photos.length) return tg.sendMessage(env, chatId, `${meta.project.name} — no photos yet.`);
   const lines = batch.tally(photos).map(([sec, n]) => `${sec} — ${n}`);
-  return tg.sendMessage(env, chatId,
-    `${meta.project.name}\n${lines.join('\n')}\n${photos.length} photo(s) total.`);
+  // The code and the caption count, not just the tally. A batch has a code from
+  // the moment it opens, but only /done used to say it, so checking on a job in
+  // progress meant finishing it first. The caption count is the other thing
+  // worth knowing before importing: how much is still being written up.
+  const written = photos.filter((p) => p.caption).length;
+  return tg.sendMessage(env, chatId, [
+    meta.project.name,
+    ...lines,
+    `${photos.length} photo(s), ${written} captioned.`,
+    `Code: ${meta.code}${meta.status === 'open' ? ' (still open — /done when finished)' : ''}`,
+  ].join('\n'));
 }
 
 async function undo(env, chatId) {

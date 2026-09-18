@@ -285,7 +285,7 @@ as they are.
 /sec CAR PORCH                 file what comes next under this section
 <forward the photos>           each one acked: ✓ CAR PORCH · 3
 /sec KITCHEN                   switch section
-/list                          what is in the batch so far
+/list                          what is in the batch so far, plus its code and caption count
 /undo                          remove the last photo
 /done                          finish, get the import code
 /cancel                        throw the batch away

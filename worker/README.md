@@ -94,7 +94,7 @@ into the bot, in whatever order suits you:
 /sec CAR PORCH                 file what follows under this section
 <forward the car porch photos> each one acked: ✓ CAR PORCH · 3
 /sec KITCHEN                   switch section
-/list                          counts so far
+/list                          counts so far, how many are captioned, and the code
 /undo                          drop the last photo
 /done                          closes it, replies with the import code
 /cancel                        throw it away

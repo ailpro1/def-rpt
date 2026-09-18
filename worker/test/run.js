@@ -76,6 +76,14 @@ await feed(cmd('/list'));
 const listReply = tgStub.texts().at(-1);
 check('/list counts by section', listReply.includes('CAR PORCH — 2') && listReply.includes('KITCHEN — 6'),
   listReply.replace(/\n/g, ' | '));
+// A batch has a code from the moment it opens. Only /done used to say it, so
+// checking on a job in progress meant finishing it first.
+check('/list gives the code of an open batch', listReply.includes(code),
+  listReply.replace(/\n/g, ' | '));
+check('/list says the batch is still open', /still open/.test(listReply),
+  listReply.replace(/\n/g, ' | '));
+check('/list says how many are captioned', /captioned/.test(listReply),
+  listReply.replace(/\n/g, ' | '));
 
 await feed(cmd('/undo'));
 photos = await batch.listPhotos(env, code);
